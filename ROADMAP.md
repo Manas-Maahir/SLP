@@ -4,6 +4,12 @@
 > disconnection profile and a readable report come out, over 108 real de-identified
 > lesions. Phase 3 — the thesis test — is blocked on outcome labels, not on code.
 > Phases 4 (registration) and 5 (model) are untouched.
+>
+> **Two disconnection matrices now exist**, built from independent references, and they
+> agree at network level (ρ +0.33) while anti-correlating parcel by parcel (ρ −0.32).
+> That is the most consequential result so far and it constrains Phase 3:
+> **individual parcel-pair edges are not reliable features.** See
+> [docs/DISCONNECTION.md](docs/DISCONNECTION.md).
 
 The ordering principle: **test the thesis before building the infrastructure.** The whole
 premise ("disconnection predicts deficit better than location") can be checked on
@@ -244,6 +250,49 @@ A third, milder finding: ranking tracts by `% severed` structurally favours smal
 Across the 108 subjects **none of the six largest tracts was ever the top hit**, though the
 corpus callosum is involved in nearly every large lesion. The report and the bar chart show
 absolute severed volume beside the percentage for this reason.
+
+---
+
+## Phase 1b — the counted matrix  ·  **DONE**
+
+A second, independent M3a, from real streamline endpoints rather than an inferred
+tract→parcel mapping. `src/lesionconn/streamlines.py`, `scripts/15_build_streamline_index.py`.
+
+- [x] `S35_1mm.trk` — 479,457 streamlines, FSL MNI152 1mm LAS, the same world box as the
+      canonical grid — read in place from the NeuroVue project.
+- [x] Each fibre's two ends assigned to a parcel (4 mm radial search); entry (i,j) is the
+      counted fraction of edge i–j's fibres passing through the lesion.
+- [x] Built for all 108 subjects alongside the inferred matrix. Neither replaces the other.
+- [x] Edge fibre-counts carried alongside, with a ≥10-fibre floor on anything a human reads.
+
+### What Phase 1b caught
+
+**The premise of the whole approximation was false.** `docs/DISCONNECTION.md` justified the
+inferred matrix by stating we had no tractogram. We did — it was in the same project as the
+other assets, in a directory that was never opened. The document now carries the correction
+rather than a quiet edit.
+
+**The two matrices disagree, and where they disagree is the finding.** Over all 108 lesions:
+
+| | median Spearman ρ | subjects positive |
+|---|---|---|
+| parcel level (415 nodes) | **−0.318** | 4 / 108 |
+| network level (17 groups) | **+0.331** | 104 / 107 |
+
+The sign flips. Three explanations were tested and rejected before the surviving one —
+normalisation (+0.045 / −0.029, far too small), fraction-vs-count (still −0.292), and a
+laterality or space bug (both matrices are correctly lateralised and mirror properly). What
+is left is granularity: both methods name the same anatomy and pick different *adjacent*
+Schaefer parcels within it. On the corona radiata probe both say motor cortex ↔ brainstem;
+one picks `SomMot_35`, the other `SomMot_37` (963 fibres, 100% cut).
+
+**Consequence for Phase 3:** coarsen to networks, or restrict to edges where the two agree,
+before treating 415×415 edges as features. This supersedes the old limit 8.
+
+**A third normalisation trap.** Median edge support is 9 fibres, so an unfiltered ranking is
+led by edges resting on a single streamline reading "100% severed" — the same failure as
+ranking tracts by `frac_severed`. Reporting floors at 10 fibres and always prints the count;
+the matrix itself is never filtered.
 
 ---
 

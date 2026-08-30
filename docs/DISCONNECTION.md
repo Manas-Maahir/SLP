@@ -13,9 +13,17 @@ ARCHITECTURE.md M3a specifies the intended object:
 > streamline bundle passes through the lesion mask.
 
 That needs **streamlines with endpoints** — a tractogram where each fibre is a polyline you
-can test against the lesion and whose two ends land in identifiable parcels. We do not have
-one. HCP-842 ships as 80 **binary volumes**, one per named tract: a tract is a region of
-space, with no fibres inside it and no endpoints.
+can test against the lesion and whose two ends land in identifiable parcels. HCP-842 ships as
+80 **binary volumes**, one per named tract: a tract is a region of space, with no fibres
+inside it and no endpoints.
+
+> **Correction.** An earlier version of this document said "We do not have one." That was
+> wrong, and it was the premise the whole approximation rested on. `S35_1mm.trk` — 479,457
+> streamlines on the FSL MNI152 1mm grid, the same world box as our canonical space — sits in
+> the NeuroVue project alongside the other assets. It is now used: see
+> **[The streamline-derived matrix](#the-streamline-derived-matrix)** below. The
+> approximation described here is still built and still emitted, because the two rest on
+> different references and neither is the truth.
 
 So the object below is derived, not measured. Both stages are approximations:
 
@@ -135,13 +143,104 @@ it, and `scripts/05_report.py` does.
 streamline-derived matrix (LQT, or an HCP tractogram). Until one is, treat the matrix as a
 plausible construction, not a validated measurement.
 
+## The streamline-derived matrix
+
+`src/lesionconn/streamlines.py` builds the object this document's first section says we could
+not: **counted**, not inferred. Each of `S35_1mm.trk`'s 479,457 fibres has its two ends
+assigned to a parcel, and entry (i,j) is the fraction of edge i–j's fibres that pass through
+the lesion.
+
+```bash
+cd scripts
+../.venv/Scripts/python.exe 15_build_streamline_index.py   # one-time, ~5 min
+```
+
+It removes limits 1, 2 and 4 — voxel overlap standing in for streamline severance, abutment
+standing in for termination, and `max` discarding convergent damage. It introduces two of
+its own:
+
+**S35 is one subject.** Nothing in NeuroVue calls it normative or population-averaged, and the
+name reads as "subject 35". HCP-842 is explicitly averaged over 842 people. So this matrix
+buys exact endpoints at the cost of a single individual's anatomy and tractography artifacts
+standing in for average wiring. **That is a real downgrade in normativeness**, which is why
+both matrices are emitted rather than one replacing the other.
+
+**Endpoint assignment needs a radius.** Tractography terminates at the grey/white boundary,
+not inside the cortical ribbon, so only 50.8% of endpoints land directly in a parcel. Assigning
+each to the nearest parcel within a radius:
+
+| radius | endpoints assigned | streamlines with both ends assigned |
+|---|---|---|
+| 0 mm | 50.8% | 22.3% |
+| 2 mm | 61.5% | 35.2% |
+| **4 mm** | **73.4%** | **53.4%** |
+| 6 mm | 85.2% | 74.3% |
+| 10 mm | 94.9% | 92.5% |
+
+The curve is smooth — there is no elbow to read a threshold from, so 4 mm is a judgement call
+recorded as one. It is two canonical voxels, comparable to cortical thickness, and matches
+MRtrix `tck2connectome`'s radial-search default. Past ~6 mm an endpoint can cross a sulcus into
+a neighbouring gyrus, which is a different parcel and a wrong edge.
+
+**Edges need a fibre floor before they are quoted.** 6,575 parcel pairs carry at least one
+streamline (7.7% density — a real connectome is sparse, against 31.5% for the inferred matrix),
+but median support is only **9 fibres**. An edge carried by one fibre reads "100% severed" the
+moment a lesion clips it, so an unranked list is led by its own weakest evidence — the same
+failure as limit 7, a normalised score with a tiny denominator. Reporting therefore filters to
+edges with ≥10 fibres and always prints the count beside the fraction. **The matrix itself is
+never filtered**; M4 receives everything.
+
+### The two matrices disagree, and where they disagree is the finding
+
+Measured across all 108 lesions, comparing the inferred (HCP-842) matrix against the counted
+(S35) one:
+
+| | median Spearman ρ | subjects positive |
+|---|---|---|
+| **parcel level** (415 nodes) | **−0.318** | 4 / 108 |
+| **network level** (17 hemisphere × network groups) | **+0.331** | 104 / 107 |
+
+The sign flips. Two methods sharing no data, no reference and no algorithm **agree about which
+brain systems a lesion disconnects and contradict each other about which individual parcel
+inside them**.
+
+Three hypotheses were tested and rejected before this one:
+
+- *normalisation* — correlation between edge fibre-count and each matrix's value is +0.045 and
+  −0.029, far too small to drive it;
+- *fraction vs count* — comparing the inferred value against raw severed-fibre counts instead
+  of fractions still gives −0.292;
+- *laterality or a space bug* — both matrices are correctly lateralised, and mirrored lesions
+  produce mirrored matrices in each.
+
+What survives is granularity. Schaefer-400 parcels average ~2,600 mm³, and a 4 mm endpoint
+search and a voxel-adjacency inference distribute damage across *neighbouring* parcels within
+the same functional region differently. On the synthetic left corona radiata probe both methods
+name motor cortex ↔ brainstem — the inferred one picks `SomMot_35` and `SomMot_30`, the counted
+one picks `SomMot_37` (963 fibres, 100% cut) and `SomMot_34`. Same anatomy, different parcel,
+and at that resolution the choice between adjacent parcels is close to arbitrary. Competing for
+rank among interchangeable neighbours produces exactly this: agreement above, anti-correlation
+below.
+
+**Consequence for M4, and it is not a small one.** A single parcel-pair edge in either matrix
+is not a reliable feature. The reproducible signal is at network resolution. Before training on
+415×415 edges, either coarsen to networks, or restrict to edges where the two matrices agree,
+and expect the parcel-level feature space to be substantially noise. This does not say either
+matrix is *right* — two methods can agree and both be wrong — but their disagreement is strong
+evidence that parcel-level edges are not resolvable from this data.
+
+This supersedes limit 8 ("untested against ground truth"). It is now tested against an
+independent construction, with a specific and unflattering answer.
+
 ## What to use for what
 
 | Purpose | Use | Why |
 |---|---|---|
 | M4 features (primary) | the 80-dim tract-severance vector | one approximation, not two; nothing derived |
-| M4 features (secondary) | flattened upper triangle of `D` | the ARCHITECTURE contract; rank by value |
-| M5 report | severed tracts, then top `D` pairs | tracts are named anatomy a clinician can check |
+| M4 features (secondary) | either matrix **coarsened to networks** | parcel-level edges anti-correlate between methods |
+| M4 features (speculative) | flattened upper triangle, full resolution | the ARCHITECTURE contract, but expect noise |
+| M5 report | severed tracts, then both matrices' top pairs | tracts are named anatomy a clinician can check |
+| a single parcel-pair claim | neither, alone | the two methods disagree there |
 | counting anything | neither | see the density table above |
 
 The **80-dim tract vector is the primary feature object**. It rests on step 1 alone, is simpler,
@@ -157,6 +256,7 @@ cd scripts
 ../.venv/Scripts/python.exe 12_tract_parcel_map.py     # --min-affinity to change the floor
 ```
 
-`disconnectome.MIN_AFFINITY` and `CONTACT_DILATION_VOXELS` are the two knobs that change what
-the matrix means. Changing either invalidates every cached matrix under `data/derived/`, and
+`disconnectome.MIN_AFFINITY` and `CONTACT_DILATION_VOXELS` are the knobs that change what the
+inferred matrix means; `streamlines.ENDPOINT_SEARCH_MM` and `MIN_EDGE_STREAMLINES` are the
+equivalents for the counted one. Changing either invalidates every cached matrix under `data/derived/`, and
 the numbers in this document with it.

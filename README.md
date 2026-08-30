@@ -17,13 +17,17 @@ report come out. Run over 108 real, de-identified lesions.
 | | |
 |---|---|
 | M3b tract severance | 80 HCP-842 tracts, laterality asserted twice and shown failing on a mirrored atlas |
-| M3a disconnection matrix | 415×415, **a derived approximation** — [docs/DISCONNECTION.md](docs/DISCONNECTION.md) |
+| M3a disconnection matrix | 415×415, **two of them**, from independent references — [docs/DISCONNECTION.md](docs/DISCONNECTION.md) |
 | cohort | 108 lesions, 0 excluded by QC, all cached |
 | M5 report | `scripts/05_report.py` → text + 4 figures |
 | M4 outcome model | **not started — there are no outcome labels for these 108** |
 
 Phase 3, the thesis test, is blocked on labels rather than on code. Bug audit:
 [docs/BUGS.md](docs/BUGS.md).
+
+> **Before building a model on the matrix, read this.** The two matrices agree about which
+> brain *systems* a lesion disconnects (median Spearman +0.33) and anti-correlate about
+> which individual *parcel* (−0.32). A single parcel-pair edge is not a reliable feature.
 
 ## Three label volumes, deliberately kept apart
 
@@ -32,6 +36,8 @@ Phase 3, the thesis test, is blocked on labels rather than on code. Bug audit:
 - **`location_atlas.nii.gz`, N=463** — Model A's feature space, and *only* that. It adds
   lateralised fibre tracts, cerebellum, and a catch-all so brain coverage is 100%.
 - **`tract_atlas.nii.gz`, 80 tracts** — HCP-842, the white-matter bundles M3b intersects.
+- **`streamline_index.npz`** — `S35_1mm.trk` reduced to endpoints and a voxel lookup. The
+  counted matrix. Read in place from the NeuroVue project; nothing is copied here.
 
 The first two are separate because reusing the node set as the location baseline made
 white-matter lesions score an all-zero feature vector — which would have handed the Phase 3
@@ -65,6 +71,7 @@ cd scripts
 ../.venv/Scripts/python.exe 10_deidentify.py          # FIRST. -> data/private/subject_map.csv
 ../.venv/Scripts/python.exe 11_build_tract_atlas.py   # HCP-842 80 tracts -> canonical grid
 ../.venv/Scripts/python.exe 12_tract_parcel_map.py    # which parcels each tract connects
+../.venv/Scripts/python.exe 15_build_streamline_index.py  # 479k streamlines -> endpoints
 ../.venv/Scripts/python.exe 13_build_cohort.py        # all 108 -> manifest + features
 
 ../.venv/Scripts/python.exe 05_report.py sub-0007     # report + figures for one subject
@@ -93,7 +100,8 @@ those calls to make something run.
 |---|---|
 | `src/lesionconn/spaces.py` | grid guardrail — `assert_same_grid`, `to_canonical` |
 | `src/lesionconn/deid.py` | patient names never leave `data/private/` |
-| `src/lesionconn/disconnectome.py` | M3 — tract severance and the parcel-pair matrix |
+| `src/lesionconn/disconnectome.py` | M3 — tract severance and the *inferred* parcel-pair matrix |
+| `src/lesionconn/streamlines.py` | M3a again — the *counted* matrix, from real fibre endpoints |
 | `src/lesionconn/cohort.py` | the 108-subject run and its manifest |
 | `src/lesionconn/report.py` | M5 — the text report and its four figures |
 | `src/lesionconn/neurovue.py` | hand-off to the NeuroVue viewer (NeuroVue unmodified) |

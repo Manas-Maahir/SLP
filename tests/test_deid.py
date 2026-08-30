@@ -53,7 +53,7 @@ def _walk_artifacts() -> list[Path]:
     return out
 
 
-def _npy_searchable(path: Path, raw: bytes) -> bytes | None:
+def _npy_searchable(raw: bytes) -> bytes | None:
     """The bytes of a .npy that could possibly carry text. None if not a .npy.
 
     A .npy is an ASCII header dict followed by the raw array buffer.
@@ -81,13 +81,51 @@ def _npy_searchable(path: Path, raw: bytes) -> bytes | None:
         return header
 
     try:
+        import io
+
         import numpy as np
 
-        array = np.load(path, allow_pickle=False)
+        array = np.load(io.BytesIO(raw), allow_pickle=False)
         decoded = " ".join(str(v) for v in array.ravel().tolist())
         return header + decoded.encode("utf-8", "replace")
     except Exception:
         return raw  # cannot decode it, so search everything rather than nothing
+
+
+def _npz_searchable(raw: bytes) -> bytes | None:
+    """An .npz is a ZIP of .npy members. Apply the .npy rule to each of them.
+
+    Not a new exemption -- the same one, followed through the container. The
+    compressed stream matched 38 cohort tokens while every decompressed member
+    matched none, which is the PNG IDAT result again: deflate output is noise and
+    grepping it is meaningless. Members are decompressed and each is passed
+    through _npy_searchable, so a text-dtype member (this index stores the
+    tractogram filename as one) is still decoded and searched in full.
+    """
+    if not raw.startswith(b"PK\x03\x04"):
+        return None
+    import io
+    import zipfile
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(raw))
+        members = archive.namelist()
+    except (zipfile.BadZipFile, OSError):
+        return None
+    if not members or not all(m.endswith(".npy") for m in members):
+        return None  # some other zip -- search it whole rather than guess
+
+    out = bytearray()
+    for member in members:
+        out += member.encode() + b"\n"
+        try:
+            body = archive.read(member)
+        except (zipfile.BadZipFile, OSError):
+            return None
+        narrowed = _npy_searchable(body)
+        out += body if narrowed is None else narrowed
+        out += b"\n"
+    return bytes(out)
 
 
 def _png_searchable(raw: bytes) -> bytes | None:
@@ -142,7 +180,11 @@ def _read_bytes(path: Path) -> bytes:
 
         with contextlib.suppress(OSError):
             raw = gzip.decompress(raw)
-    for narrow in (_npy_searchable(path, raw), _png_searchable(raw)):
+    for narrow in (
+        _npy_searchable(raw),
+        _npz_searchable(raw),
+        _png_searchable(raw),
+    ):
         if narrow is not None:
             return narrow
     return raw
@@ -325,3 +367,37 @@ def test_png_narrowing_drops_only_the_pixel_stream(tmp_path):
     searchable = _read_bytes(path)
     assert len(searchable) < len(raw), "IDAT should have been dropped"
     assert b"Software" in searchable, "text chunks should have been kept"
+
+
+def test_npz_narrowing_follows_the_npy_rule_into_the_archive(tmp_path):
+    """Numeric members skipped, text members decoded -- same rule, through a ZIP."""
+    import numpy as np
+
+    tokens = {"jane"}
+    pattern = re.compile(deid.token_pattern(tokens).pattern.encode(), re.IGNORECASE)
+
+    clean = tmp_path / "clean.npz"
+    np.savez_compressed(clean, a=np.zeros(64, np.float32), b=np.arange(64))
+    assert not pattern.search(_read_bytes(clean))
+
+    # a text-dtype member still has to be found, even though it is inside a ZIP
+    # AND stored as UTF-32
+    leaky = tmp_path / "leaky.npz"
+    np.savez_compressed(leaky, a=np.zeros(64, np.float32), source=np.array("Jane"))
+    assert b"Jane" not in leaky.read_bytes(), "precondition: compressed and UTF-32"
+    assert pattern.search(_read_bytes(leaky)), "a name in an .npz member must be found"
+
+
+def test_a_non_npy_zip_is_still_searched_whole(tmp_path):
+    """The narrowing applies to numpy archives only, not to zips in general."""
+    import zipfile
+
+    tokens = {"jane"}
+    pattern = re.compile(deid.token_pattern(tokens).pattern.encode(), re.IGNORECASE)
+    path = tmp_path / "notes.zip"
+    with zipfile.ZipFile(path, "w") as z:
+        # trailing punctuation on purpose: a stored zip member is followed
+        # immediately by the central directory, so a name at the very end of
+        # the content is glued to "PK" and has no word boundary after it.
+        z.writestr("notes.txt", "patient Jane, admitted.")
+    assert pattern.search(_read_bytes(path))

@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 from nilearn import datasets
 
-from . import config, deid, disconnectome as dc, qc
+from . import config, deid, disconnectome as dc, qc, streamlines as st
 from .atlases import load_location_atlas, load_parcellation
 from .lesions import intake_lesion_mask, lesion_parcel_overlap, location_feature_vector
 from .spaces import to_canonical
@@ -41,6 +41,7 @@ def subject_paths(subject_id: str) -> dict[str, Path]:
         "severed_tracts_path": config.DISCONNECTOME_DIR / f"{subject_id}_severed_tracts.json",
         "tract_vector_path": FEATURES_DIR / f"{subject_id}_tract_severance.npy",
         "matrix_path": FEATURES_DIR / f"{subject_id}_disconnection_matrix.npy",
+        "streamline_matrix_path": FEATURES_DIR / f"{subject_id}_streamline_matrix.npy",
         "location_path": FEATURES_DIR / f"{subject_id}_location.npy",
     }
 
@@ -62,6 +63,9 @@ class Atlases:
     location_img: object
     location_labels: pd.DataFrame
     brain_mask: object
+    # None when the tractogram index has not been built; the streamline matrix is
+    # then skipped and the rest of the cohort run proceeds unchanged.
+    streamline_index: object = None
 
     @classmethod
     def load(cls) -> "Atlases":
@@ -77,11 +81,23 @@ class Atlases:
             parc_img=parc_img, parc_labels=parc_labels,
             location_img=location_img, location_labels=location_labels,
             brain_mask=brain,
+            streamline_index=(
+                st.load_streamline_index()
+                if st.STREAMLINE_INDEX_PATH.exists() else None
+            ),
         )
 
 
 def is_cached(subject_id: str) -> bool:
-    return all(p.exists() for p in subject_paths(subject_id).values())
+    """All artifacts present. The streamline matrix is optional -- it only exists
+    when a tractogram index has been built, so its absence must not force a
+    recompute of everything else."""
+    optional = {"streamline_matrix_path"}
+    return all(
+        path.exists()
+        for key, path in subject_paths(subject_id).items()
+        if key not in optional
+    )
 
 
 def process_subject(
@@ -118,6 +134,15 @@ def process_subject(
     # 4. M3a -- the parcel-pair matrix (see docs/DISCONNECTION.md)
     matrix = dc.disconnection_matrix(sev, atlases.tract_parcel_map)
 
+    # 4b. M3a again, from real streamline endpoints rather than an inferred
+    #     parcel mapping. A second, independent estimate of the same object --
+    #     see src/lesionconn/streamlines.py for why neither is "the" answer.
+    streamline_matrix = None
+    if atlases.streamline_index is not None:
+        streamline_matrix = st.streamline_disconnection_matrix(
+            lesion, atlases.streamline_index
+        )
+
     # 5. the location baseline, from the N=463 atlas -- NOT the N=415 node set,
     #    or white-matter lesions score all zeros (docs/BUGS.md B1)
     location = location_feature_vector(
@@ -133,6 +158,8 @@ def process_subject(
     dc.write_severed_tracts(sev, paths["severed_tracts_path"])
     np.save(paths["tract_vector_path"], tract_vector)
     np.save(paths["matrix_path"], matrix)
+    if streamline_matrix is not None:
+        np.save(paths["streamline_matrix_path"], streamline_matrix)
     np.save(paths["location_path"], location)
 
     top_tract = sev.hit.iloc[0] if len(sev.hit) else None
@@ -162,6 +189,15 @@ def process_subject(
         # M3a
         "matrix_nonzero_pairs": int((upper > 0).sum()),
         "matrix_max": round(float(matrix.max()), 6),
+        # M3a, streamline-derived
+        "streamline_matrix_nonzero_pairs": (
+            0 if streamline_matrix is None
+            else int((streamline_matrix[np.triu_indices(streamline_matrix.shape[0], 1)] > 0).sum())
+        ),
+        "n_streamlines_cut": (
+            0 if atlases.streamline_index is None
+            else int(st.severed_streamlines(lesion, atlases.streamline_index).size)
+        ),
         # location baseline (N=463)
         "n_location_regions": len(location_overlap),
         "location_nonzero": int((location > 0).sum()),

@@ -24,7 +24,9 @@ import _bootstrap  # noqa: F401
 import numpy as np
 from nilearn import datasets
 
-from lesionconn import config, deid, disconnectome as dc, qc, report as rp
+from lesionconn import (
+    config, deid, disconnectome as dc, qc, report as rp, streamlines as st,
+)
 from lesionconn.atlases import load_location_atlas, load_parcellation
 from lesionconn.lesions import (
     intake_lesion_mask, lesion_parcel_overlap, location_feature_vector,
@@ -103,6 +105,9 @@ def main() -> int:
         subject_id=subject_id, native_volume_mm3=intake.native_volume_mm3,
     )
     matrix = dc.disconnection_matrix(severance, dc.load_tract_parcel_map())
+    streamline_matrix = None
+    if st.STREAMLINE_INDEX_PATH.exists():
+        streamline_matrix = st.streamline_disconnection_matrix(lesion)
     parcel_overlap = lesion_parcel_overlap(lesion, parc_img, parc_labels)
     # Anatomy is described from the coverage-complete N=463 atlas; the N=415
     # node set only ever describes what the matrix can see. See docs/BUGS.md B1.
@@ -117,7 +122,7 @@ def main() -> int:
     text = rp.render_text(
         subject_id, lesion, severance, parcel_overlap,
         location_overlap=location_overlap,
-        matrix=matrix, parc_labels=parc_labels,
+        matrix=matrix, streamline_matrix=streamline_matrix, parc_labels=parc_labels,
         native_volume_mm3=intake.native_volume_mm3,
         native_grid=intake.native_grid, qc_status=qc_status,
         figures=figures,
@@ -127,6 +132,8 @@ def main() -> int:
 
     dc.write_severed_tracts(severance, out_dir / "severed_tracts.json")
     np.save(out_dir / f"{subject_id}_disconnection_matrix.npy", matrix)
+    if streamline_matrix is not None:
+        np.save(out_dir / f"{subject_id}_streamline_matrix.npy", streamline_matrix)
 
     # The location baseline is Model A's feature space, not a disconnection
     # measure -- emitted alongside, never mixed into the report's findings.
