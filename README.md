@@ -20,14 +20,21 @@ report come out. Run over 108 real, de-identified lesions.
 | M3a disconnection matrix | 415×415, **two of them**, from independent references — [docs/DISCONNECTION.md](docs/DISCONNECTION.md) |
 | cohort | 108 lesions, 0 excluded by QC, all cached |
 | M5 report | `scripts/05_report.py` → text + 4 figures |
-| M4 outcome model | **not started — there are no outcome labels for these 108** |
+| M1 registration | ARC T2w → MNI, cost-function masked, **Dice 0.924** — [docs/REGISTRATION.md](docs/REGISTRATION.md) |
+| M4 outcome model | harness built and validated; **the 108 still have no labels, and none were invented** |
 
-Phase 3, the thesis test, is blocked on labels rather than on code. Bug audit:
-[docs/BUGS.md](docs/BUGS.md).
+The thesis test runs on **ARC** (228 subjects with a lesion mask *and* a WAB Aphasia
+Quotient), not on the 108. Bug audit: [docs/BUGS.md](docs/BUGS.md).
 
-> **Before building a model on the matrix, read this.** The two matrices agree about which
-> brain *systems* a lesion disconnects (median Spearman +0.33) and anti-correlate about
-> which individual *parcel* (−0.32). A single parcel-pair edge is not a reliable feature.
+> **Before building a model on the matrix, read this.** Two things are measured and both
+> constrain what a model here can honestly claim.
+>
+> 1. The two matrices agree about which brain *systems* a lesion disconnects (median
+>    Spearman +0.33) and anti-correlate about which individual *parcel* (−0.32). A single
+>    parcel-pair edge is not a reliable feature.
+> 2. **Lesion volume is recoverable from the disconnection features** at R² 0.47 (tracts)
+>    to 0.66 (network edges). Beating the location baseline is not enough; the arm that
+>    answers the question is `volume+X` against `volume` alone.
 
 ## Three label volumes, deliberately kept apart
 
@@ -74,6 +81,13 @@ cd scripts
 ../.venv/Scripts/python.exe 15_build_streamline_index.py  # 479k streamlines -> endpoints
 ../.venv/Scripts/python.exe 13_build_cohort.py        # all 108 -> manifest + features
 
+../.venv/Scripts/python.exe 16_fetch_arc_anat.py      # 228 ARC T2w (~0.91 GB, targeted)
+../.venv/Scripts/python.exe 17_register_arc.py --pilot 8   # LOOK at the output first
+../.venv/Scripts/python.exe 17_register_arc.py --workers 5 # then the batch
+../.venv/Scripts/python.exe 18_build_arc_cohort.py    # ARC -> manifest + features
+../.venv/Scripts/python.exe 19_train.py --target volume            # harness check
+../.venv/Scripts/python.exe 19_train.py --target wab_aq --cohort arc  # the thesis test
+
 ../.venv/Scripts/python.exe 05_report.py sub-0007     # report + figures for one subject
 ../.venv/Scripts/python.exe 14_export_neurovue.py     # optional: bundle for the NeuroVue viewer
 cd ..
@@ -102,6 +116,8 @@ those calls to make something run.
 | `src/lesionconn/deid.py` | patient names never leave `data/private/` |
 | `src/lesionconn/disconnectome.py` | M3 — tract severance and the *inferred* parcel-pair matrix |
 | `src/lesionconn/streamlines.py` | M3a again — the *counted* matrix, from real fibre endpoints |
+| `src/lesionconn/registration.py` | M1 — native T2w → MNI, cost-function masked |
+| `src/lesionconn/modeling.py` | Phase 3 — nested CV, the volume control, the permutation null |
 | `src/lesionconn/cohort.py` | the 108-subject run and its manifest |
 | `src/lesionconn/report.py` | M5 — the text report and its four figures |
 | `src/lesionconn/neurovue.py` | hand-off to the NeuroVue viewer (NeuroVue unmodified) |

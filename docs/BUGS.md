@@ -6,7 +6,7 @@ by probing behaviour, which is where this class of defect lives.
 
 Ordered by blast radius, not by effort.
 
-## Status: all resolved (62 tests, lint clean)
+## Status: all resolved (B1-B8; see each entry for its verification)
 
 | | bug | outcome |
 |---|---|---|
@@ -182,6 +182,42 @@ Unused imports across `scripts/`, `src/lesionconn/atlases.py`, `viz.py` and two 
 one `zip()` without `strict=`; three stale `# noqa` directives. No behavioural impact.
 
 **Fix.** `ruff check --fix`, then add ruff to the verification sequence so this stays at zero.
+
+---
+
+## B8 — A float32 QC image trips the de-identification scan ★ medium · FIXED
+
+`scripts/17_register_arc.py --pilot` saved each warped T2w as **float32**, and the repo-wide
+de-identification scan then reported patient-token hits in all 8 of them.
+
+**Measured before concluding anything.** Every match sat in the voxel payload, none in the
+header, and all were 3–4 character fragments of cohort first names sitting inside float
+mantissa bytes. **The fragments are deliberately not reproduced here** — this document is
+itself scanned, and quoting a matched token turns a false positive into a real leak. That is
+not hypothetical: the first draft of this entry listed all five and the scan rejected it,
+which is the third time in this project that a name reached a file by way of an author
+explaining a name. Re-encoding one volume without touching a single voxel:
+
+| payload dtype | token matches |
+|---|---|
+| float32 | **26** |
+| int16 | **0** |
+| uint16 | 0 |
+
+The raw ARC images are int16 and matched nothing across 210 MB when scanned earlier. The
+coincidence was created entirely by the dtype this project chose to write, not by the data.
+This is the same phenomenon already documented for `.npy` float32 buffers, where 3 of the 108
+cohort matrices matched a three-letter name inside their mantissas.
+
+**Fix — the artifact, not the check.** The warped T2w is a visual QC image whose source is
+int16, so it is written as int16 (clipped, rounded). Matches go to zero and the files halve to
+3.1 MB. `tests/test_deid.py` is **unchanged**: NIfTI payloads are still scanned in full, and a
+name in a float32 NIfTI would still be caught.
+
+**The class is not closed.** Any future float32 NIfTI — a probability map, a warp field, a
+distance transform — will reproduce this. The options at that point are to narrow the NIfTI
+scan to headers (the `.npy` precedent) or to keep eating false positives. That is a guardrail
+decision, so it is recorded here rather than taken quietly.
 
 ---
 

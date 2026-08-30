@@ -1,9 +1,12 @@
 # ROADMAP.md
 
-> **Status, 2026-08-30.** Phases 0, 1, 2 and 6 are done: a lesion mask goes in and a
-> disconnection profile and a readable report come out, over 108 real de-identified
-> lesions. Phase 3 — the thesis test — is blocked on outcome labels, not on code.
-> Phases 4 (registration) and 5 (model) are untouched.
+> **Status, 2026-08-30 (late).** Phases 0, 1, 2 and 6 are done: a lesion mask goes in and
+> a disconnection profile and a readable report come out, over 108 real de-identified
+> lesions. **Phase 3 is no longer blocked on labels** — ARC's 228 labelled subjects were
+> on disk all along (`data/raw/arc/`), and the earlier "blocked on outcome labels" note
+> was stale for that cohort. The blocker was registration, and M1 now exists:
+> `src/lesionconn/registration.py`, validated at median Dice 0.924. See
+> [docs/REGISTRATION.md](docs/REGISTRATION.md).
 >
 > **Two disconnection matrices now exist**, built from independent references, and they
 > agree at network level (ρ +0.33) while anti-correlating parcel by parcel (ρ −0.32).
@@ -167,13 +170,15 @@ why the native figure is the one recorded and the one the report quotes.
 
 Goal: answer *does disconnection beat location?* This is the go/no-go for the whole idea.
 
-> **BLOCKED, and not by code.** The pipeline is built and the feature store exists for 108
-> subjects, but **those 108 have no outcome labels**. Model A and Model B can both be
-> trained the moment a target variable arrives; there is nothing to train on today, and
-> inventing one would answer the question with an artefact. ARC (`ds004884`, WAB-AQ,
-> n=245) remains the labelled cohort and needs M1 registration first — see Phase 4.
-> Feature objects ready: 80-dim tract severance (primary), 415×415 disconnection matrix
-> (secondary), 463-dim location baseline (Model A).
+> **UNBLOCKED as of 2026-08-30.** The note that stood here — "blocked on outcome labels" —
+> was true of the 108 and stale for ARC. `data/raw/arc/participants.tsv` has a WAB-AQ for
+> all 245 participants, and **228 of them have a lesion mask**: mean 63.3, sd 28.1, full
+> range 5–100. The 108 still have no labels and none have been invented.
+>
+> The real blocker was registration, and it is done (Phase 4a). What remains is to run the
+> comparison and read it honestly. Feature objects ready: 80-dim tract severance (primary),
+> 136 network edges from each of the two matrices, 463-dim location baseline (Model A), and
+> the `volume+X` incremental arms that the confound measurement made necessary.
 
 - [ ] Model A (baseline): location features → outcome. Ridge / elastic-net / GBT.
 - [ ] Model B (thesis): flattened disconnection matrix → outcome. Same model families.
@@ -186,6 +191,68 @@ Exit / decision:
 - **B ≈ A** → dig into representation (Phase 5) before declaring anything.
 - **B < A** → stop and rethink; something's off in M3 or the labels. Better to learn this now
   than after building a UI.
+
+---
+
+## Phase 4a — M1 registration, ARC only  ·  **DONE**
+
+Pulled forward, because Phase 3 cannot run without it. `src/lesionconn/registration.py`,
+`scripts/16_fetch_arc_anat.py`, `scripts/17_register_arc.py`, `scripts/18_build_arc_cohort.py`.
+Full write-up: [docs/REGISTRATION.md](docs/REGISTRATION.md).
+
+- [x] The 228 T2w anatomicals the masks are drawn on, fetched by sidecar reference (~0.91 GB,
+      targeted — not the 902-session blind sync `03_fetch_arc.py` warns about).
+- [x] T2w → FSL MNI152 1mm (the grid ANTsPy ships, asserted against `Grid.canonical()`),
+      `SyNRA`, Mattes MI on both stages because T2-against-T1 is cross-modality.
+- [x] **Cost-function masking with `mask_all_stages=True`** — ANTsPy's default masks the SyN
+      stage only, leaving the affine free to pull healthy tissue into the lesion.
+- [x] Pilot of 8 before the batch, looked at as images and not only as numbers.
+
+### What the pilot caught
+
+**A −30% lesion volume change that is not a defect.** Every subject's lesion shrinks by about
+a third entering MNI. Measured against the transform that produced it: affine linear
+determinant 1.5144, so the implied moving→fixed volume scale is 0.660, against a measured
+lesion ratio of 0.704. The lesion scales by very nearly the global factor, and whole-brain
+Dice against the template is **0.924 median / 0.901 min**. The compression is uniform and
+correct. Consequence: for ARC the MNI volume is the honest one, which is the *opposite* of the
+rule for the 108 (docs/BUGS.md B2), where no registration happened.
+
+**Laterality is the QC that matters.** ARC is an aphasia cohort, so a right-dominant warped
+lesion has been mirrored — the failure that hit Phase 0 and Phase 1. All 8 pilot subjects came
+back left-dominant (median `frac_left` 1.000). Two ARC masks are PSR-oriented against 226 RAS,
+so both paths have to survive it.
+
+---
+
+## Phase 3 harness  ·  **BUILT AND VALIDATED** (on the 108, against lesion volume)
+
+`src/lesionconn/modeling.py`, `scripts/19_train.py`. Nested CV, distributions rather than point
+scores, a permutation null, and a lesion-volume arm forced into every comparison.
+
+Validated on the 108 with **log lesion volume** as the target — a real measured quantity, not
+an invented outcome. Two things came out of it:
+
+- **The positive control passes.** The volume arm predicting log volume returns R² = 1.0000
+  exactly, so the machinery is wired correctly end to end.
+- **The confound is large, and now measured.** How much of each feature set is simply lesion
+  size:
+
+  | feature set | R² predicting log lesion volume |
+  |---|---|
+  | network edges, counted matrix | **0.656** |
+  | network edges, inferred matrix | 0.612 |
+  | 80-dim tract severance | 0.467 |
+  | 463-dim location baseline | 0.377 |
+
+**Consequence for Phase 3, and it changes the design:** beating the location baseline is not
+enough, and neither is beating volume head-to-head. Two-thirds of the network-edge features is
+recoverable lesion size, so the question has to be asked incrementally — `volume+tracts`
+against `volume` alone. Those arms are now in the default run.
+
+The harness is also tested against itself: pure noise must score R² ≤ 0 and must not reach a
+small permutation p. Both are in `tests/test_modeling.py`, because a CV harness that
+manufactures signal would produce a thesis result out of nothing.
 
 ---
 

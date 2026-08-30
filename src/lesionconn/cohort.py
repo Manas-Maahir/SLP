@@ -215,6 +215,7 @@ def build_cohort(
     force: bool = False,
     limit: int | None = None,
     progress_every: int = 10,
+    manifest_path: Path | None = None,
 ) -> pd.DataFrame:
     """Process every subject in the map. Cached subjects are re-read, not redone.
 
@@ -222,15 +223,21 @@ def build_cohort(
     its row survives in the previous manifest -- the artifacts alone cannot
     reconstruct the summary columns, and half-reusing would silently mix a stale
     row with fresh files.
+
+    `manifest_path` selects which prior manifest the cache check reads. A second
+    cohort (ARC) shares the per-subject caches, whose ids cannot collide with
+    `sub-NNNN`, but must not share the manifest -- one file cannot hold two
+    cohorts' QC without the outlier rule pooling their volume distributions.
     """
     subject_map = deid.load_subject_map() if subject_map is None else subject_map
     atlases = Atlases.load() if atlases is None else atlases
     if limit:
         subject_map = subject_map.head(limit)
 
+    manifest_path = Path(manifest_path or config.MANIFEST_PATH)
     previous: dict[str, dict] = {}
-    if not force and config.MANIFEST_PATH.exists():
-        prior = load_manifest()
+    if not force and manifest_path.exists():
+        prior = load_manifest(manifest_path)
         previous = {str(r["subject_id"]): dict(r) for _, r in prior.iterrows()}
 
     rows, failures, n_cached = [], [], 0
