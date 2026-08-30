@@ -247,6 +247,25 @@ absolute severed volume beside the percentage for this reason.
 
 ---
 
+## Stretch — NeuroVue hand-off  ·  **partly done**
+
+`src/lesionconn/neurovue.py` + `scripts/14_export_neurovue.py`. **NeuroVue is not modified.**
+
+- [x] File drop: writes the exact `LESION_DIR/<slug>/lesion_<timestamp>.nii.gz` layout
+      NeuroVue's own `POST /api/lesions` produces, plus a per-subject `disconnection.json`
+      and an `index.json`. `LESION_DIR=<bundle> uvicorn server:app` picks it up with no code
+      change and no database write. Verified: bundle written for 3 subjects, layout and
+      de-identification asserted.
+- [x] Upload client for NeuroVue's existing route. Verified against a **stub** implementing
+      that route's declared multipart contract.
+- [ ] **Not run against a live NeuroVue backend** — that needs its FastAPI app and MongoDB
+      running. The upload path should be considered unproven until it is.
+- [ ] No NeuroVue UI work: the viewer shows the mask, but nothing there reads
+      `disconnection.json` yet. Rendering the severed-tract list in the sidebar is the
+      obvious next step, and is the first thing that would touch NeuroVue's own code.
+
+---
+
 ## Throughline reminders
 
 - **Labels are the bottleneck.** Chase the outcome-labelled cohort early (Phase 0), not late.

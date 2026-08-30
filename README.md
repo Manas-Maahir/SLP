@@ -68,6 +68,7 @@ cd scripts
 ../.venv/Scripts/python.exe 13_build_cohort.py        # all 108 -> manifest + features
 
 ../.venv/Scripts/python.exe 05_report.py sub-0007     # report + figures for one subject
+../.venv/Scripts/python.exe 14_export_neurovue.py     # optional: bundle for the NeuroVue viewer
 cd ..
 ./.venv/Scripts/python.exe -m ruff check --select F,E7,E9,B,SIM,RUF --ignore E731 src/ scripts/ tests/
 ./.venv/Scripts/python.exe -m pytest tests/ -q
@@ -95,6 +96,7 @@ those calls to make something run.
 | `src/lesionconn/disconnectome.py` | M3 — tract severance and the parcel-pair matrix |
 | `src/lesionconn/cohort.py` | the 108-subject run and its manifest |
 | `src/lesionconn/report.py` | M5 — the text report and its four figures |
+| `src/lesionconn/neurovue.py` | hand-off to the NeuroVue viewer (NeuroVue unmodified) |
 | `src/lesionconn/atlases.py` | the N=415 disconnection node set, and the N=463 location atlas |
 | `src/lesionconn/lesions.py` | intake (with native-volume capture), synthetic lesions, parcel overlap |
 | `src/lesionconn/qc.py` | cohort QC gate — exclusions are always recorded with a cited reason |
