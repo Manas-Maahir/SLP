@@ -1,0 +1,20 @@
+# Environments
+.venv/
+__pycache__/
+*.py[cod]
+
+# Data: large, and some of it is access-controlled (ATLAS requires a signed
+# agreement + encryption code). Never commit any of it.
+data/
+*.nii
+*.nii.gz
+*.npy
+
+# Tooling
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Patient-identifying material. data/ above already covers this; it is repeated
+# explicitly so the rule survives anyone ever relaxing the data/ line.
+data/private/
+**/subject_map.csv
