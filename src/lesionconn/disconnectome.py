@@ -511,3 +511,166 @@ def write_severed_tracts(sev: TractSeverance, path: str | Path) -> Path:
     deid.guard_output(text, f"severed_tracts.json for {sev.subject_id}")
     path.write_text(text, encoding="utf-8")
     return path
+
+
+# ---------------------------------------------------------------------------
+# M3a -- the parcel x parcel disconnection matrix
+#
+# READ docs/DISCONNECTION.md BEFORE USING THIS. It is NOT a streamline-derived
+# connectome. We have tract VOLUMES, not streamline endpoints, so which parcels a
+# tract connects has to be inferred from which parcels it abuts. That inference,
+# and its limits, are the subject of that document.
+# ---------------------------------------------------------------------------
+
+# Contact is counted after dilating the tract by one canonical voxel (2mm), so a
+# bundle running alongside a parcel counts as touching it. Without the dilation,
+# contact would depend on whether the atlas happens to extend into grey matter.
+CONTACT_DILATION_VOXELS = 1
+
+# A tract's affinity for a parcel is its contact with that parcel relative to its
+# own strongest contact, so the scale is per-tract rather than per-parcel size.
+# Below this, the contact is passage rather than termination: the tract runs past
+# the parcel. Corpus_Callosum abuts 402 of the 415 parcels, so without a floor a
+# single callosal lesion would claim ~80,600 disconnected parcel pairs -- over 90%
+# of the matrix -- from one tract.
+MIN_AFFINITY = 0.15
+
+
+def build_tract_parcel_map(
+    tract_img=None,
+    tract_labels: pd.DataFrame | None = None,
+    parc_img=None,
+    parc_labels: pd.DataFrame | None = None,
+    dilation: int = CONTACT_DILATION_VOXELS,
+    min_affinity: float = MIN_AFFINITY,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Which parcels each tract abuts, and how strongly.
+
+    Returns one row per surviving (tract, parcel) pair with the raw contact voxel
+    count and the normalised affinity. This is the approximation the whole matrix
+    rests on; see docs/DISCONNECTION.md.
+    """
+    from scipy import ndimage
+
+    from .atlases import load_parcellation
+
+    if tract_img is None:
+        tract_img, tract_labels = load_tract_atlas()
+    if parc_img is None:
+        parc_img, parc_labels = load_parcellation()
+
+    assert_canonical(tract_img, "tract atlas")
+    assert_canonical(parc_img, "parcellation")
+
+    parc = np.asarray(parc_img.dataobj).astype(np.int64)
+    tracts = np.asarray(tract_img.dataobj)
+    n_parcels = int(parc_labels["index"].max())
+
+    rows = []
+    for row in tract_labels.itertuples():
+        mask = tracts[..., row.index] > 0
+        if dilation:
+            mask = ndimage.binary_dilation(mask, iterations=dilation)
+        contact = np.bincount(parc[mask], minlength=n_parcels + 1)
+        contact[0] = 0  # unlabelled voxels are not a parcel
+        strongest = int(contact.max())
+        if strongest == 0:
+            continue
+        affinity = contact / strongest
+        for parcel_index in np.flatnonzero(affinity >= min_affinity):
+            rows.append({
+                "tract_index": int(row.index),
+                "tract_name": row.name,
+                "parcel_index": int(parcel_index),
+                "contact_voxels": int(contact[parcel_index]),
+                "affinity": round(float(affinity[parcel_index]), 4),
+            })
+
+    df = pd.DataFrame(rows)
+    if verbose:
+        per_tract = df.groupby("tract_index").size()
+        print(f"  tract-parcel pairs kept   : {len(df):,} (affinity >= {min_affinity})")
+        print(f"  parcels per tract         : median {per_tract.median():.0f}  "
+              f"min {per_tract.min()}  max {per_tract.max()}")
+        widest = per_tract.idxmax()
+        print(f"  widest tract              : "
+              f"{tract_labels.loc[widest, 'name']} -> {per_tract.max()} parcels")
+        print(f"  tracts with no parcel      : "
+              f"{len(tract_labels) - df['tract_index'].nunique()}")
+    return df
+
+
+def save_tract_parcel_map(df: pd.DataFrame) -> None:
+    config.ensure_dirs()
+    df.to_csv(config.TRACT_PARCEL_MAP_PATH, index=False)
+
+
+def load_tract_parcel_map() -> pd.DataFrame:
+    if not config.TRACT_PARCEL_MAP_PATH.exists():
+        raise FileNotFoundError(
+            f"{config.TRACT_PARCEL_MAP_PATH} not found -- run "
+            "scripts/12_tract_parcel_map.py first"
+        )
+    return pd.read_csv(config.TRACT_PARCEL_MAP_PATH)
+
+
+def disconnection_matrix(
+    sev: TractSeverance,
+    tract_parcel_map: pd.DataFrame | None = None,
+    n_parcels: int = config.EXPECTED_N_PARCELS,
+) -> np.ndarray:
+    """The N x N matrix of ARCHITECTURE.md's M3 -> M4 contract.
+
+    ``D[i, j] = max over tracts t of  f_t * a(t, i) * a(t, j)``
+
+    where ``f_t`` is the fraction of tract t severed and ``a(t, p)`` is parcel p's
+    affinity for tract t. Row i is parcel index i+1, matching the parcellation
+    labels CSV.
+
+    ``max`` rather than a sum or a product: two tracts connecting the same parcel
+    pair are not independent damage channels, and we have no basis for combining
+    them. The strongest single disruption is the defensible summary.
+
+    The entry is *weighted evidence that the i-j connection is disrupted*, not a
+    severed-streamline fraction. docs/DISCONNECTION.md spells out the difference.
+    """
+    if tract_parcel_map is None:
+        tract_parcel_map = load_tract_parcel_map()
+
+    matrix = np.zeros((n_parcels, n_parcels), dtype=np.float32)
+    frac_by_tract = dict(
+        zip(sev.table["index"], sev.table["frac_severed"], strict=True)
+    )
+
+    for tract_index, group in tract_parcel_map.groupby("tract_index"):
+        f = float(frac_by_tract.get(int(tract_index), 0.0))
+        if f <= 0.0:
+            continue  # an intact tract disconnects nothing
+        rows = group["parcel_index"].to_numpy() - 1  # parcel 1..N -> row 0..N-1
+        keep = (rows >= 0) & (rows < n_parcels)
+        rows, affinity = rows[keep], group["affinity"].to_numpy()[keep]
+        block = f * np.outer(affinity, affinity)
+        sub = matrix[np.ix_(rows, rows)]
+        matrix[np.ix_(rows, rows)] = np.maximum(sub, block)
+
+    np.fill_diagonal(matrix, 0.0)  # a parcel is not disconnected from itself
+    return matrix
+
+
+def matrix_summary(matrix: np.ndarray, parc_labels: pd.DataFrame, top_n: int = 10):
+    """The strongest disconnected parcel pairs, for the human-readable report."""
+    n = matrix.shape[0]
+    iu = np.triu_indices(n, k=1)
+    values = matrix[iu]
+    order = np.argsort(values)[::-1][:top_n]
+    name_of = dict(zip(parc_labels["index"], parc_labels["name"], strict=True))
+    return [
+        {
+            "parcel_a": name_of.get(int(iu[0][o]) + 1, f"parcel {iu[0][o] + 1}"),
+            "parcel_b": name_of.get(int(iu[1][o]) + 1, f"parcel {iu[1][o] + 1}"),
+            "value": float(values[o]),
+        }
+        for o in order
+        if values[o] > 0
+    ]
