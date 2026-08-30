@@ -53,17 +53,55 @@ def _walk_artifacts() -> list[Path]:
     return out
 
 
+def _npy_searchable(path: Path, raw: bytes) -> bytes | None:
+    """The bytes of a .npy that could possibly carry text. None if not a .npy.
+
+    A .npy is an ASCII header dict followed by the raw array buffer.
+
+    * **Numeric payload** -- only the header can hold text, so only the header is
+      searched. This narrowing is not a convenience: byte-grepping a float32
+      buffer produces coincidences, and 3 of the 108 cohort matrices matched a
+      three-letter cohort name inside their mantissa bytes. (0x3B, the exponent
+      byte of small floats, is dense in this data, so such collisions are common
+      rather than rare.) A check that fires on arithmetic teaches you to ignore
+      it, which is worse than not having it.
+    * **Text payload** -- searched in full, and DECODED first. numpy stores
+      unicode arrays as UTF-32, so a name in one is invisible to a byte grep;
+      decoding closes that gap rather than trusting the raw bytes.
+    """
+    if not raw.startswith(b"\x93NUMPY"):
+        return None
+    end = raw.find(b"\n", 0, 4096)
+    if end == -1:
+        return None
+    header = raw[: end + 1]
+
+    descr = header.split(b"'descr':")[1][:16] if b"'descr':" in header else b""
+    if not any(code in descr for code in (b"U", b"S", b"O")):
+        return header
+
+    try:
+        import numpy as np
+
+        array = np.load(path, allow_pickle=False)
+        decoded = " ".join(str(v) for v in array.ravel().tolist())
+        return header + decoded.encode("utf-8", "replace")
+    except Exception:
+        return raw  # cannot decode it, so search everything rather than nothing
+
+
 def _read_bytes(path: Path) -> bytes:
     if path.stat().st_size > MAX_BYTES:
         return b""
     raw = path.read_bytes()
     if path.suffix.lower() in GZIP_SUFFIXES:
+        import contextlib
         import gzip
-        try:
-            return gzip.decompress(raw)
-        except OSError:
-            return raw
-    return raw
+
+        with contextlib.suppress(OSError):
+            raw = gzip.decompress(raw)
+    searchable = _npy_searchable(path, raw)
+    return raw if searchable is None else searchable
 
 
 @pytest.fixture(scope="module")
@@ -155,3 +193,51 @@ def test_assert_deidentified_catches_a_name_in_report_text():
     deid.assert_deidentified("sub-0001 lesion volume 4200 mm3", toks, "report")
     with pytest.raises(ValueError, match="patient-identifying token"):
         deid.assert_deidentified("Report for Jane, MRN 123456X", toks, "report")
+
+
+def test_npy_narrowing_still_catches_a_name_in_the_header_or_a_text_payload(tmp_path):
+    """The .npy narrowing must not become a hole to hide a name in.
+
+    Only the raw numeric buffer is skipped. A name in the header, or a .npy whose
+    dtype is textual, still has to be found.
+    """
+    import numpy as np
+
+    tokens = {"jane", "123456x"}
+    pattern = re.compile(deid.token_pattern(tokens).pattern.encode(), re.IGNORECASE)
+
+    # a numeric payload: skipped, so an accidental byte collision cannot fire
+    numeric = tmp_path / "numeric.npy"
+    np.save(numeric, np.zeros((4, 4), dtype=np.float32))
+    assert not pattern.search(_read_bytes(numeric))
+
+    # a TEXT payload: decoded, then fully searched. Decoding matters -- numpy
+    # stores unicode as UTF-32, so "Jane" is not contiguous in the raw bytes.
+    textual = tmp_path / "textual.npy"
+    np.save(textual, np.array(["Jane", "ok"]))
+    assert b"Jane" not in textual.read_bytes(), "precondition: UTF-32, not raw ASCII"
+    assert pattern.search(_read_bytes(textual)), "a string-dtype .npy must still be scanned"
+
+    # and the same for a bytes-dtype array, where the name IS contiguous
+    raw_bytes = tmp_path / "bytes.npy"
+    np.save(raw_bytes, np.array([b"Jane"]))
+    assert pattern.search(_read_bytes(raw_bytes))
+
+    # a name smuggled into the header region is still visible
+    doctored = tmp_path / "doctored.npy"
+    doctored.write_bytes(b"\x93NUMPY\x01\x00v\x00{'descr': 'Jane', 'shape': (1,)}\n" + b"\x00" * 64)
+    assert pattern.search(_read_bytes(doctored))
+
+
+def test_nifti_payloads_are_still_scanned_in_full(tmp_path):
+    """NIfTI headers carry a free-text descrip field, so nothing is narrowed there."""
+    import nibabel as nib
+    import numpy as np
+
+    tokens = {"jane"}
+    pattern = re.compile(deid.token_pattern(tokens).pattern.encode(), re.IGNORECASE)
+    img = nib.Nifti1Image(np.zeros((4, 4, 4), np.int16), np.eye(4))
+    img.header["descrip"] = b"Jane"
+    path = tmp_path / "leaky.nii.gz"
+    nib.save(img, path)
+    assert pattern.search(_read_bytes(path)), "a name in a NIfTI descrip must be found"
