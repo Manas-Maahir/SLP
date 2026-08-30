@@ -20,6 +20,7 @@ yields the same ids -- re-running never silently renumbers a cohort.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -129,13 +130,51 @@ def source_path_for(subject_id: str, df: pd.DataFrame | None = None) -> Path:
     return Path(str(hits.iloc[0]))
 
 
+def token_pattern(tokens) -> re.Pattern[str]:
+    """One compiled matcher for "does this text contain a patient identifier".
+
+    Word-bounded, not substring. Two real cohort first names happen to sit inside
+    ``corticothalamic_pathway_l`` and ``device``; a substring rule flags both and
+    would block the pipeline from ever writing a tract name or the disclaimer.
+    A name embedded in a longer word is not a disclosure.
+
+    Both callers -- this module's write guard and the whole-repo grep in
+    tests/test_deid.py -- go through here, so the two cannot drift apart. They
+    did drift once, and the write guard was the looser of the two.
+    """
+    if not tokens:
+        return re.compile(r"(?!x)x")  # matches nothing
+    return re.compile(
+        r"\b(?:" + "|".join(re.escape(t) for t in sorted(tokens)) + r")\b", re.IGNORECASE
+    )
+
+
 def assert_deidentified(text: str, tokens: set[str] | None = None, what: str = "text") -> None:
     """Raise if any patient token appears in ``text``. For anything about to be written."""
     tokens = sensitive_tokens() if tokens is None else tokens
-    lowered = text.lower()
-    found = sorted(t for t in tokens if t in lowered)
+    found = sorted(set(token_pattern(tokens).findall(text)))
     if found:
         raise ValueError(
             f"{what} contains {len(found)} patient-identifying token(s) and must not be "
             f"written outside {config.PRIVATE_DIR}. (Tokens withheld from this message.)"
         )
+
+
+@lru_cache(maxsize=1)
+def _cached_tokens() -> frozenset[str]:
+    try:
+        return frozenset(sensitive_tokens())
+    except FileNotFoundError:
+        return frozenset()
+
+
+def guard_output(text: str, what: str = "output") -> None:
+    """`assert_deidentified` for pipeline code, tolerant of no cohort being present.
+
+    Synthetic-lesion runs and fresh clones have no subject map and therefore
+    nothing to leak, so the check no-ops. When a cohort IS mapped, every string
+    the pipeline is about to write goes through here.
+    """
+    tokens = _cached_tokens()
+    if tokens:
+        assert_deidentified(text, set(tokens), what)

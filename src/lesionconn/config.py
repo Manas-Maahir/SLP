@@ -44,6 +44,15 @@ TRACT_LABELS_PATH = ATLAS_DIR / "tract_labels.csv"
 TRACT_PARCEL_MAP_PATH = ATLAS_DIR / "tract_parcel_map.csv"
 EXPECTED_N_TRACTS = 80
 
+# Carried in every emitted artifact -- JSON, text report and figure footers.
+DISCLAIMER = (
+    "RESEARCH TOOL, NOT A DIAGNOSTIC DEVICE. Disconnection is inferred by "
+    "intersecting this lesion with a NORMATIVE tractography atlas (HCP-842) built "
+    "from healthy brains; no diffusion imaging of this patient was used. Findings "
+    "describe average wiring, not this individual's, and must not be used for "
+    "clinical decisions."
+)
+
 PARCELLATION_PATH = ATLAS_DIR / "parcellation.nii.gz"
 PARCELLATION_LABELS_PATH = ATLAS_DIR / "parcellation_labels.csv"
 

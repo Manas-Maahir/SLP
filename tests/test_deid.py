@@ -80,13 +80,11 @@ def tokens() -> set[str]:
 
 def test_no_patient_token_appears_in_any_emitted_artifact(tokens):
     """The whole point of Milestone 0."""
-    # One regex over all tokens: 260 separate scans of every file takes minutes;
-    # this takes under a second. Word boundaries keep a short name from firing inside a
-    # longer ordinary word. (This test first failed on a real cohort name quoted
-    # in this very comment -- which is the argument for scanning our own source.)
+    # deid.token_pattern is the single definition of "this text names a patient",
+    # shared with the write guard so the two cannot disagree. Encoded to bytes so
+    # NIfTI headers and PNG metadata are searched the same way as source.
     pattern = re.compile(
-        rb"\b(?:" + b"|".join(re.escape(t.encode()) for t in sorted(tokens)) + rb")\b",
-        re.IGNORECASE,
+        deid.token_pattern(tokens).pattern.encode(), re.IGNORECASE
     )
 
     leaks: list[str] = []
