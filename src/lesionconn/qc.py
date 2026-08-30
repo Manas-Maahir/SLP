@@ -100,24 +100,32 @@ def check_lesion_mask(img, subject_id: str, brain_mask=None) -> QCResult:
     return r
 
 
-def check_cohort(results, mad_threshold: float = VOLUME_OUTLIER_MAD) -> pd.DataFrame:
-    """Add cohort-relative volume outlier flags to per-subject results.
+def flag_volume_outliers(
+    df: pd.DataFrame,
+    volume_col: str = "volume_mm3",
+    reason_col: str = "reasons",
+    mad_threshold: float = VOLUME_OUTLIER_MAD,
+) -> pd.DataFrame:
+    """Add cohort-relative volume outlier flags to a per-subject frame.
 
     Median absolute deviation on log volume: lesion volumes are heavily
     right-skewed, so a mean/SD rule would flag most genuinely large strokes.
 
     Outliers are flagged for review, never auto-excluded -- a very large stroke
-    is a real patient, not a data error.
+    is a real patient, not a data error. `passed` is deliberately untouched.
+
+    Column names are parameters because the cohort manifest keys volume on
+    `native_volume_mm3` (measured before resampling, docs/BUGS.md B2) while the
+    per-subject QC frame keys it on the canonical `volume_mm3`. One rule, two
+    callers; duplicating it would let the two drift.
     """
-    df = pd.DataFrame([vars(r) for r in results])
     if df.empty:
         return df
 
-    df["reasons"] = df["reasons"].apply(lambda xs: "; ".join(xs))
-    ok = df["volume_mm3"] > 0
+    ok = df[volume_col] > 0
     df["volume_outlier"] = False
     if int(ok.sum()) >= 3:
-        logv = np.log10(df.loc[ok, "volume_mm3"])
+        logv = np.log10(df.loc[ok, volume_col])
         med = logv.median()
         mad = (logv - med).abs().median()
         if mad > 0:
@@ -126,11 +134,20 @@ def check_cohort(results, mad_threshold: float = VOLUME_OUTLIER_MAD) -> pd.DataF
 
     flagged = df["volume_outlier"].to_numpy()
     if flagged.any():
-        existing = df.loc[flagged, "reasons"]
-        df.loc[flagged, "reasons"] = [
+        existing = df.loc[flagged, reason_col].fillna("")
+        df.loc[flagged, reason_col] = [
             (e + "; volume outlier vs cohort").lstrip("; ") for e in existing
         ]
     return df
+
+
+def check_cohort(results, mad_threshold: float = VOLUME_OUTLIER_MAD) -> pd.DataFrame:
+    """`flag_volume_outliers` over a list of per-subject QCResults."""
+    df = pd.DataFrame([vars(r) for r in results])
+    if df.empty:
+        return df
+    df["reasons"] = df["reasons"].apply(lambda xs: "; ".join(xs))
+    return flag_volume_outliers(df, mad_threshold=mad_threshold)
 
 
 def qc_report(df: pd.DataFrame) -> str:

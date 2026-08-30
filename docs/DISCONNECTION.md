@@ -112,7 +112,26 @@ baseline, which is why the N=463 location atlas exists separately. A purely verm
 therefore produces an all-zero matrix while still producing a correct tract-severance vector.
 Another argument for the vector being the primary feature object.
 
-**7. Untested against ground truth.** No comparison has been made against a real
+**7. `frac_severed` is normalised, so ranking by it favours small tracts.** Measured over the
+108-lesion cohort, the tract with the highest `frac_severed` was:
+
+| | voxels | times ranked top of 108 |
+|---|---|---|
+| `Vertical_Occipital_Fasciculus_R` | 633 | 15 |
+| `Vertical_Occipital_Fasciculus_L` | 735 | 12 |
+| `Middle_Longitudinal_Fasciculus_R` | 780 | 8 |
+| **`Corpus_Callosum`** | **61,553** | **0** |
+| **`Corticothalamic_Pathway_L`** | **20,711** | **0** |
+| **`Cortico_Striatal_Pathway_L`** | **16,557** | **0** |
+
+**None of the six largest tracts is ever the top hit for any subject**, though the corpus
+callosum is involved in nearly every large lesion. This is not a defect in `frac_severed` —
+"what fraction of this bundle is destroyed" is the right question — but it means the
+highest-`frac_severed` tract is *not* the same thing as the most consequential
+disconnection. Any report ranking by `frac_severed` must show absolute severed volume beside
+it, and `scripts/05_report.py` does.
+
+**8. Untested against ground truth.** No comparison has been made against a real
 streamline-derived matrix (LQT, or an HCP tractogram). Until one is, treat the matrix as a
 plausible construction, not a validated measurement.
 

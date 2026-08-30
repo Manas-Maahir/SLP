@@ -75,8 +75,16 @@ def intake_lesion_mask(
     warn_pct: float = VOLUME_DELTA_WARN_PCT,
     quiet: bool = False,
 ) -> LesionIntake:
-    """Load a mask onto the canonical grid, recording what resampling cost it."""
+    """Load a mask onto the canonical grid, recording what resampling cost it.
+
+    When ``subject_id`` is given it is used in place of the filename in every
+    message and error this function raises. The cohort filenames carry patient
+    names and MRNs, and warnings end up in logs, so a de-identified caller must
+    be able to guarantee no filename is ever printed (see lesionconn.deid).
+    """
     path = Path(path)
+    # Only fall back to the filename when the caller has not de-identified.
+    label = subject_id if subject_id is not None else path.name
     subject_id = subject_id or path.name.split("_")[0]
 
     img = nib.load(str(path))
@@ -85,14 +93,14 @@ def intake_lesion_mask(
     native_grid = Grid.of(img)
 
     if n_unique > 2 and not quiet:
-        print(f"  note: {path.name} has {n_unique} distinct values; binarizing at > 0")
+        print(f"  note: {label} has {n_unique} distinct values; binarizing at > 0")
 
     binary = new_img_like(img, (data > 0).astype(np.int16), copy_header=True)
     binary.set_data_dtype(np.int16)
     native_volume = float(np.count_nonzero(data > 0) * native_grid.voxel_volume_mm3)
 
     canonical = to_canonical(binary, interpolation="nearest")
-    assert_canonical(canonical, path.name)
+    assert_canonical(canonical, label)
     canonical_volume = float(
         np.count_nonzero(np.asarray(canonical.dataobj)) * Grid.canonical().voxel_volume_mm3
     )
@@ -105,10 +113,10 @@ def intake_lesion_mask(
 
     if not quiet:
         if canonical_volume == 0:
-            print(f"  WARNING: {path.name} is empty after binarizing")
+            print(f"  WARNING: {label} is empty after binarizing")
         elif abs(rec.volume_delta_pct) > warn_pct:
             print(
-                f"  WARNING: {path.name} volume changed {rec.volume_delta_pct:+.1f}% on "
+                f"  WARNING: {label} volume changed {rec.volume_delta_pct:+.1f}% on "
                 f"resampling ({native_volume:.0f} -> {canonical_volume:.0f} mm3). "
                 "Use native_volume_mm3 for anything volume-dependent."
             )
