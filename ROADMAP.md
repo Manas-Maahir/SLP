@@ -1,5 +1,10 @@
 # ROADMAP.md
 
+> **Status, 2026-08-30.** Phases 0, 1, 2 and 6 are done: a lesion mask goes in and a
+> disconnection profile and a readable report come out, over 108 real de-identified
+> lesions. Phase 3 — the thesis test — is blocked on outcome labels, not on code.
+> Phases 4 (registration) and 5 (model) are untouched.
+
 The ordering principle: **test the thesis before building the infrastructure.** The whole
 premise ("disconnection predicts deficit better than location") can be checked on
 pre-normalized public data with zero registration code. If that check fails, no amount of
@@ -74,39 +79,95 @@ exactly where cost-function masking / enantiomorphic normalization becomes manda
 
 ---
 
-## Phase 1 — Disconnectome for one brain  ·  (~a week)
+## Phase 1 — Disconnectome for one brain  ·  **DONE**
 
 Goal: one lesion → one disconnection matrix. No ML yet.
 
-- [ ] Get a normative connectome (LQT-bundled or HCP-842).
-- [ ] **Path A (wrap):** run Lesion Quantification Toolkit on one ATLAS lesion → matrix.
-      Check whether the Python build does what you need before committing to MATLAB.
-- [ ] **Path B (build):** intersect the lesion with HCP-842 in `nibabel`+`numpy` → N×N matrix
-      yourself. Fall back here if MATLAB blocks you.
-- [ ] Produce `disconnection_matrix.npy` for a single subject and visualize it (heatmap +
-      a chord diagram). Does it look sane — sparse, symmetric, hitting plausible regions?
+- [x] Normative connectome: **HCP-842**, 80 named tracts, sourced from the NeuroVue project
+      and read in place. `data/atlases/tract_atlas.nii.gz` is the canonical-grid build.
+- [x] **Path B (build)** taken. LQT was not needed — `src/lesionconn/disconnectome.py` does
+      the intersection in `nibabel` + `numpy`. `scripts/11_build_tract_atlas.py`.
+- [x] `disconnection_matrix.npy` (415×415) and `severed_tracts.json` per subject, plus the
+      80-dim tract-severance vector. Heatmap and bar chart in `scripts/05_report.py`.
 
-Exit: a reproducible function `lesion_mask → N×N disconnection matrix`.
+Exit: **met.** `disconnectome.severed_tracts(lesion)` and `disconnectome.disconnection_matrix()`
+are reproducible functions over any canonical-grid mask.
+
+### What Phase 1 caught
+
+The atlas is 1mm **LPS**; the canonical grid is 2mm **LAS**. Same failure class as Phase 0's
+Harvard-Oxford/Schaefer bug, so laterality is asserted twice and independently — once on
+anatomy (sign, bulk, L/R pair order) and once with no anatomy at all (every tract's centre of
+mass must land where it started). Both are shown *failing* on a deliberately mirrored atlas in
+`tests/test_disconnectome.py`.
+
+Two thresholds were set by measuring, and the first guess was wrong both times:
+
+1. A ">5mm off midline" rule for lateralised tracts rejected seven **brainstem** tracts whose
+   centres of mass genuinely sit 2–5mm out — in the native atlas too, so the resampling was
+   faithful and the check was the error.
+2. The centre-of-mass tolerance is 5mm, from a measured distribution of median 0.19 / p95 0.91
+   / max 3.94mm, whose three largest shifts are all tracts under 100 voxels — sampling noise
+   going as 1/√N, not misregistration.
+
+Resampling cost is recorded per tract, as `intake_lesion_mask` records it for lesions. Real
+tracts lose under 2% of volume at 2mm; the cranial nerves lose ~10%. 18 of 80 are flagged
+`thin`, never dropped.
 
 ---
 
-## Phase 2 — Batch the cohort  ·  (~a few days)
+## Phase 2 — Batch the cohort  ·  **DONE** (108 lesions, no labels)
 
 Goal: run Phase 1 over the whole dataset, build the feature store.
 
-- [ ] Loop the M3 function over all ATLAS lesions → one matrix per subject.
-- [ ] Build `manifest.csv`: subject_id, matrix path, outcome label.
-- [ ] Also compute the **location baseline features** (which parcels each lesion overlaps) —
-      you need these for the benchmark in Phase 3.
-- [ ] Cache everything to disk so you never recompute.
+- [x] M3 over **108 real lesions** (from the NeuroVue project, `(182,218,182)` 1mm LAS —
+      already MNI-resliced, so no registration needed). `src/lesionconn/cohort.py`.
+- [x] `manifest.csv`: de-identified id, cached artifact paths, native volume, QC status and
+      reason, location-baseline summary. **No outcome label column — there are none.**
+- [x] Location baseline features from the N=463 atlas, cached per subject.
+- [x] Everything cached under `data/derived/cohort/`; a re-run reuses all 108 in ~5s.
 
-Exit: a folder of matrices + a manifest + a parallel location-feature table.
+Exit: **met.** Matrices, tract vectors, location vectors, a manifest, and a per-subject
+`severed_tracts.json`.
+
+### Milestone 0 — de-identification came first
+
+The 108 filenames carried patient names and apparent MRNs. Ids are `sub-0001…sub-0108`,
+assigned by sorted filename so a re-run never renumbers; the id↔filename map is the only
+artifact holding them and lives in `data/private/`, gitignored twice.
+
+`tests/test_deid.py` greps **every** emitted artifact — source, docs, CSV, JSON, NIfTI, PNG —
+for every identifying token, and it scans this repo's own source too. That has caught a real
+name three times: twice quoted in a code comment by the author, once in a report path.
+
+Two narrowings were needed, both measured before being made. Raw float32 `.npy` payloads and
+compressed PNG `IDAT` streams produce **coincidental** matches (3 matrices and 4 figures), so
+those regions are excluded — while `.npy` headers, text-dtype `.npy` payloads (decoded, since
+numpy stores unicode as UTF-32), NIfTI headers, and PNG `tEXt`/`zTXt`/`iTXt` chunks
+(decompressed) are all still searched, each proven by a test that plants a name there.
+
+### QC: 0 of 108 excluded, and that is a measured result
+
+The gate ran on every subject and nothing came near a threshold: smallest lesion 496 mm³
+against a 100 mm³ floor, worst 2.2% outside brain against a 10% limit, largest 14.7% of brain
+against a 50% limit. No subject sits within 2× of any threshold. This cohort arrives clean.
+
+13 subjects change volume by more than 10% on the 1mm→2mm resample — exactly B2, and exactly
+why the native figure is the one recorded and the one the report quotes.
 
 ---
 
 ## Phase 3 — Test the thesis  ·  (~1–2 weeks)  ★ the pivotal phase
 
 Goal: answer *does disconnection beat location?* This is the go/no-go for the whole idea.
+
+> **BLOCKED, and not by code.** The pipeline is built and the feature store exists for 108
+> subjects, but **those 108 have no outcome labels**. Model A and Model B can both be
+> trained the moment a target variable arrives; there is nothing to train on today, and
+> inventing one would answer the question with an artefact. ARC (`ds004884`, WAB-AQ,
+> n=245) remains the labelled cohort and needs M1 registration first — see Phase 4.
+> Feature objects ready: 80-dim tract severance (primary), 415×415 disconnection matrix
+> (secondary), 463-dim location baseline (Model A).
 
 - [ ] Model A (baseline): location features → outcome. Ridge / elastic-net / GBT.
 - [ ] Model B (thesis): flattened disconnection matrix → outcome. Same model families.
@@ -151,16 +212,38 @@ Exit: a result that says something the off-the-shelf tools don't.
 
 ---
 
-## Phase 6 — Report & viz layer  ·  (~1 week)
+## Phase 6 — Report & viz layer  ·  **DONE**
 
 Goal: the output a human actually wants.
 
-- [ ] Atlas-referenced text report (region overlaps + severed tracts, `atlasquery`-style).
-- [ ] Glass-brain + chord-diagram renders (`nilearn`).
-- [ ] Wrap the whole pipeline behind one entry point (a script or a thin web UI).
-- [ ] Keep the **"research tool, not a diagnostic"** framing visible in the output itself.
+- [x] Atlas-referenced text report: volume, anatomy with % overlap, severed tracts with %
+      severed *and* absolute volume, top disconnected parcel pairs.
+- [x] Glass brain, lesion on template, severed-tract bar chart, matrix heatmap.
+- [x] One entry point: `scripts/05_report.py <lesion.nii.gz>` (or a `sub-NNNN` id).
+- [x] "Research tool, not a diagnostic" in the report header, its footer, the JSON, and the
+      caption of every figure.
 
-Exit: drop in a brain, get back a readable disconnection report.
+Exit: **met.** Verified by running it on three real lesions and reading the output.
+
+### What reading the output caught
+
+Neither of these would have failed a test written from the spec; both were only visible by
+looking at a real report.
+
+1. **The anatomy section used the wrong atlas.** Built from the N=415 node set it led with
+   *left* occipital parcels for a lesion that is 70% *right* cerebellum — the node set has no
+   cerebellar labels, so it saw only the 17.8% of that lesion outside the cerebellum and
+   presented that minority as a confident table. Anatomy now comes from the N=463 location
+   atlas, and the node-set section states its own coverage and says so loudly when most of the
+   lesion is invisible to it.
+2. **The "native" volume was measured on resampled data.** A cohort id resolved to the cached
+   2mm mask, so sub-0035 reported 424 mm³ against a true 496 mm³ — a 14.5% error on precisely
+   the number B2 exists to protect.
+
+A third, milder finding: ranking tracts by `% severed` structurally favours small tracts.
+Across the 108 subjects **none of the six largest tracts was ever the top hit**, though the
+corpus callosum is involved in nearly every large lesion. The report and the bar chart show
+absolute severed volume beside the percentage for this reason.
 
 ---
 
