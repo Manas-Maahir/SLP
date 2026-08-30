@@ -90,6 +90,48 @@ def _npy_searchable(path: Path, raw: bytes) -> bytes | None:
         return raw  # cannot decode it, so search everything rather than nothing
 
 
+def _png_searchable(raw: bytes) -> bytes | None:
+    """Every PNG chunk that can hold text, with the compressed pixels dropped.
+
+    A PNG is a chunk stream. Text lives in tEXt / zTXt / iTXt -- matplotlib puts
+    the figure Title and Software there -- and the pixels live in IDAT, which is
+    a zlib stream and therefore indistinguishable from noise.
+
+    Same reasoning as _npy_searchable: scanning IDAT matched cohort names in 4 of
+    the rendered figures, every one of them inside the compressed pixel data and
+    none in a text chunk. Compressed text chunks ARE decompressed and searched,
+    so narrowing the scan does not create anywhere to hide a name.
+    """
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    import zlib
+
+    out = bytearray()
+    offset = 8
+    while offset + 8 <= len(raw):
+        length = int.from_bytes(raw[offset : offset + 4], "big")
+        kind = raw[offset + 4 : offset + 8]
+        body = raw[offset + 8 : offset + 8 + length]
+        if length < 0 or offset + 12 + length > len(raw):
+            return None  # malformed: search the whole thing rather than nothing
+        if kind != b"IDAT":
+            out += kind + b" " + body + b"\n"
+            if kind in (b"zTXt", b"iTXt"):
+                # the compressed tail starts after the keyword; try each null
+                for cut in range(len(body)):
+                    if body[cut : cut + 1] != b"\x00":
+                        continue
+                    try:
+                        out += zlib.decompress(body[cut + 1 :]) + b"\n"
+                        break
+                    except zlib.error:
+                        continue
+        if kind == b"IEND":
+            break
+        offset += 12 + length
+    return bytes(out)
+
+
 def _read_bytes(path: Path) -> bytes:
     if path.stat().st_size > MAX_BYTES:
         return b""
@@ -100,8 +142,10 @@ def _read_bytes(path: Path) -> bytes:
 
         with contextlib.suppress(OSError):
             raw = gzip.decompress(raw)
-    searchable = _npy_searchable(path, raw)
-    return raw if searchable is None else searchable
+    for narrow in (_npy_searchable(path, raw), _png_searchable(raw)):
+        if narrow is not None:
+            return narrow
+    return raw
 
 
 @pytest.fixture(scope="module")
@@ -241,3 +285,43 @@ def test_nifti_payloads_are_still_scanned_in_full(tmp_path):
     path = tmp_path / "leaky.nii.gz"
     nib.save(img, path)
     assert pattern.search(_read_bytes(path)), "a name in a NIfTI descrip must be found"
+
+
+def test_png_narrowing_still_catches_a_name_in_figure_metadata(tmp_path):
+    """Only IDAT is dropped. Text chunks are where a figure title would leak."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    tokens = {"jane"}
+    pattern = re.compile(deid.token_pattern(tokens).pattern.encode(), re.IGNORECASE)
+
+    clean = tmp_path / "clean.png"
+    fig = plt.figure(figsize=(2, 2))
+    fig.savefig(clean)
+    plt.close(fig)
+    assert not pattern.search(_read_bytes(clean))
+
+    leaky = tmp_path / "leaky.png"
+    fig = plt.figure(figsize=(2, 2))
+    fig.savefig(leaky, metadata={"Title": "Jane"})
+    plt.close(fig)
+    assert pattern.search(_read_bytes(leaky)), "a name in a PNG tEXt chunk must be found"
+
+
+def test_png_narrowing_drops_only_the_pixel_stream(tmp_path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    path = tmp_path / "fig.png"
+    fig = plt.figure(figsize=(3, 3))
+    fig.savefig(path)
+    plt.close(fig)
+
+    raw = path.read_bytes()
+    searchable = _read_bytes(path)
+    assert len(searchable) < len(raw), "IDAT should have been dropped"
+    assert b"Software" in searchable, "text chunks should have been kept"
