@@ -25,7 +25,8 @@ import numpy as np
 from nilearn import datasets
 
 from lesionconn import (
-    config, deid, disconnectome as dc, qc, report as rp, streamlines as st,
+    config, deid, disconnectome as dc, predict as pr, qc, report as rp,
+    streamlines as st,
 )
 from lesionconn.atlases import load_location_atlas, load_parcellation
 from lesionconn.lesions import (
@@ -119,6 +120,39 @@ def main() -> int:
         subject_id, lesion, severance, matrix, parc_labels, out_dir
     )
 
+    # --- outcome prediction, if a model has been fitted -------------------
+    #
+    # Appended to the report rather than woven into it: the disconnection
+    # findings above stand on their own measurement, while this is a learned
+    # model whose applicability is narrow and whose error is large. Keeping them
+    # separate means a refused prediction does not invalidate the rest.
+    location_vector = location_feature_vector(lesion, location_img, location_labels)
+    prediction_block = ""
+    try:
+        models = pr.load_models()
+    except FileNotFoundError:
+        print("outcome : no model fitted (run scripts/20_fit_model.py)")
+    else:
+        refusals = pr.applicability(lesion, intake.native_volume_mm3, models)
+        rows = [] if refusals else pr.predict(
+            models,
+            volume_mm3=intake.native_volume_mm3,
+            location_vector=location_vector,
+            tract_vector=severance.vector(),
+            matrix=matrix,
+            streamline_matrix=streamline_matrix,
+        )
+        prediction_block = pr.render_block(rows, refusals)
+        if refusals:
+            print(f"outcome : REFUSED -- {refusals[0][:70]}...")
+        else:
+            best = min(rows, key=lambda r: r["cv_mae"])
+            print(
+                f"outcome : WAB-AQ ~{best['predicted_wab_aq']:.0f} "
+                f"[{best['interval_lo']:.0f}, {best['interval_hi']:.0f}] "
+                f"({best['feature_set']})"
+            )
+
     text = rp.render_text(
         subject_id, lesion, severance, parcel_overlap,
         location_overlap=location_overlap,
@@ -127,6 +161,8 @@ def main() -> int:
         native_grid=intake.native_grid, qc_status=qc_status,
         figures=figures,
     )
+    if prediction_block:
+        text = text.rstrip() + chr(10) + prediction_block
     report = rp.Report(subject_id=subject_id, text=text, figures=figures, out_dir=out_dir)
     report_path = rp.write_report(report, out_dir / "report.txt")
 
@@ -137,10 +173,7 @@ def main() -> int:
 
     # The location baseline is Model A's feature space, not a disconnection
     # measure -- emitted alongside, never mixed into the report's findings.
-    np.save(
-        out_dir / f"{subject_id}_location.npy",
-        location_feature_vector(lesion, location_img, location_labels),
-    )
+    np.save(out_dir / f"{subject_id}_location.npy", location_vector)
 
     print()
     print(f"  report : {report_path}")

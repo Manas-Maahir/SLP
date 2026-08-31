@@ -180,6 +180,15 @@ Goal: answer *does disconnection beat location?* This is the go/no-go for the wh
 > 136 network edges from each of the two matrices, 463-dim location baseline (Model A), and
 > the `volume+X` incremental arms that the confound measurement made necessary.
 
+- [x] Model A (baseline): location features → outcome. Ridge / elastic-net / GBT.
+- [x] Model B (thesis): tract severance and network edges → outcome, same families.
+- [x] Nested CV, 25 outer folds, distributions not point scores, permutation null.
+- [x] **Answered: B ≈ A.** Full write-up and the paired test: [docs/PHASE3.md](docs/PHASE3.md).
+- [x] M4 shipped anyway: `src/lesionconn/predict.py` fits on all 228, persists, and
+      `05_report.py` prints a predicted WAB-AQ — refusing outright for lesions outside the
+      left-hemisphere aphasia distribution it was trained on.
+
+Superseded checklist (kept for the record):
 - [ ] Model A (baseline): location features → outcome. Ridge / elastic-net / GBT.
 - [ ] Model B (thesis): flattened disconnection matrix → outcome. Same model families.
 - [ ] **Nested cross-validation**, heavy regularization — features hugely outnumber subjects,

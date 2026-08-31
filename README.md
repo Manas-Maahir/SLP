@@ -21,7 +21,7 @@ report come out. Run over 108 real, de-identified lesions.
 | cohort | 108 lesions, 0 excluded by QC, all cached |
 | M5 report | `scripts/05_report.py` → text + 4 figures |
 | M1 registration | ARC T2w → MNI, cost-function masked, **Dice 0.924** — [docs/REGISTRATION.md](docs/REGISTRATION.md) |
-| M4 outcome model | harness built and validated; **the 108 still have no labels, and none were invented** |
+| M4 outcome model | trained on ARC (n=228), persisted, wired into the report — **but B ≈ A**, see [docs/PHASE3.md](docs/PHASE3.md) |
 
 The thesis test runs on **ARC** (228 subjects with a lesion mask *and* a WAB Aphasia
 Quotient), not on the 108. Bug audit: [docs/BUGS.md](docs/BUGS.md).
@@ -87,6 +87,7 @@ cd scripts
 ../.venv/Scripts/python.exe 18_build_arc_cohort.py    # ARC -> manifest + features
 ../.venv/Scripts/python.exe 19_train.py --target volume            # harness check
 ../.venv/Scripts/python.exe 19_train.py --target wab_aq --cohort arc  # the thesis test
+../.venv/Scripts/python.exe 20_fit_model.py           # fit + persist the final models
 
 ../.venv/Scripts/python.exe 05_report.py sub-0007     # report + figures for one subject
 ../.venv/Scripts/python.exe 14_export_neurovue.py     # optional: bundle for the NeuroVue viewer
@@ -117,7 +118,8 @@ those calls to make something run.
 | `src/lesionconn/disconnectome.py` | M3 — tract severance and the *inferred* parcel-pair matrix |
 | `src/lesionconn/streamlines.py` | M3a again — the *counted* matrix, from real fibre endpoints |
 | `src/lesionconn/registration.py` | M1 — native T2w → MNI, cost-function masked |
-| `src/lesionconn/modeling.py` | Phase 3 — nested CV, the volume control, the permutation null |
+| `src/lesionconn/modeling.py` | Phase 3 — nested CV, the volume control, the paired test |
+| `src/lesionconn/predict.py` | M4 — the persisted model, and what it refuses to answer |
 | `src/lesionconn/cohort.py` | the 108-subject run and its manifest |
 | `src/lesionconn/report.py` | M5 — the text report and its four figures |
 | `src/lesionconn/neurovue.py` | hand-off to the NeuroVue viewer (NeuroVue unmodified) |
