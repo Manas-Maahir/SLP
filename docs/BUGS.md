@@ -6,7 +6,7 @@ by probing behaviour, which is where this class of defect lives.
 
 Ordered by blast radius, not by effort.
 
-## Status: all resolved (B1-B8; see each entry for its verification)
+## Status: all resolved (B1-B9; see each entry for its verification)
 
 | | bug | outcome |
 |---|---|---|
@@ -17,6 +17,8 @@ Ordered by blast radius, not by effort.
 | B5 | no QC gate | fixed — `lesionconn/qc.py` |
 | B6 | overlay renders label indices as brightness | fixed |
 | B7 | 12 lint findings | fixed — clean, ruff added to verification |
+| B8 | float32 NIfTI trips the de-id scan | fixed — QC image written as int16 |
+| B9 | a ZIP container is invisible to the de-id scan | fixed — archive members decompressed |
 
 Two things this audit got wrong before measuring, recorded because the reasoning matters more
 than the fix:
@@ -218,6 +220,43 @@ name in a float32 NIfTI would still be caught.
 distance transform — will reproduce this. The options at that point are to narrow the NIfTI
 scan to headers (the `.npy` precedent) or to keep eating false positives. That is a guardrail
 decision, so it is recorded here rather than taken quietly.
+
+---
+
+## B9 — A ZIP container is invisible to the de-identification scan ★ high · FIXED
+
+Introduced by this repo, not by the data: `docs/Lesion_Disconnection_Status.pptx` is the first
+ZIP-format artifact the project emits. **A .pptx is a ZIP**, so `tests/test_deid.py`'s whole-repo
+byte grep was reading deflate output — noise — and would have passed on a deck with a patient
+name on every slide.
+
+This is the same blind spot the `.npy` and PNG narrowings were measured against, with the sign
+reversed. Those narrowings were deliberate decisions to scan *less* after measuring that the
+excluded region produced only coincidences. This one was an accident that scanned *nothing*.
+
+**Measured, before deciding anything.** Planting a name in a slide and grepping the archive:
+
+| | name found by a raw byte grep |
+|---|---|
+| name in `ppt/slides/slide1.xml`, stored deflated | **no** |
+| same file, after decompressing members | **yes** |
+
+**Fix — the detector, because the detector was genuinely blind.** B8's rule was "fix the
+artifact, not the detector", and it does not apply here: there is nothing wrong with the
+artifact, and no way to write a PowerPoint file that is not a ZIP. `_zip_searchable` decompresses
+every member and runs each one back through the per-format narrowings, so a PNG embedded in a
+deck is treated exactly like a PNG on disk — `tEXt`/`zTXt`/`iTXt` searched, `IDAT` dropped as
+B8 measured it should be. `.npz` is also a ZIP and is claimed by `_npz_searchable` first, so its
+stricter handling is unchanged.
+
+Two tests pin it: one plants a name in a deck slide and asserts the raw grep misses it while the
+scan catches it, and one asserts `.npz` is still claimed by the narrower rule.
+
+**Verified on the real artifact.** The deck's 75 archive members and 9 embedded images were
+scanned. One raw hit appeared, in an `IDAT` stream of a matplotlib figure — B8's coincidence
+class again, in a chunk the measured rule already excludes. Zero hits in any text-bearing region.
+
+**This class now covers .docx, .xlsx and .zip too**, none of which the project emits yet.
 
 ---
 

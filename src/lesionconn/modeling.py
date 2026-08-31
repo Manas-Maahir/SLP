@@ -25,7 +25,18 @@ outer folds and repeats with a percentile interval. A single number from a
 single split of 228 subjects is noise with a decimal point.
 
 **A permutation null.** R^2 on small n can be positive by luck; the p-value is
-computed against labels shuffled through the same pipeline.
+computed against labels shuffled through the same pipeline. `permutation_p`
+takes a model name because the null has to run the SAME family that produced the
+headline number -- the first Phase 3 run left it on ridge, which is unusable on
+the network-edge features (fold interval to -63.5), so the null validated arms
+nobody was quoting.
+
+**Confounds removed fold-safe, not merely reported.** `evaluate(confounds=...)`
+residualises the target inside each outer fold. The `volume+X` arms were the
+weak form of this question and on trees they can score BELOW X alone, because
+the tree already recovers volume from X. Fitting the nuisance model once on the
+whole cohort -- the obvious implementation -- leaks test outcomes into the
+residual, so it is fitted per training split.
 
 Feature-set choice is constrained by a measured result, not by taste. The two
 disconnection matrices anti-correlate parcel by parcel (median Spearman -0.318)
@@ -53,6 +64,18 @@ DENSE_MODEL_MAX_FEATURES = 5_000
 DEFAULT_SPLITS = 5
 DEFAULT_REPEATS = 5
 DEFAULT_SEED = 20260830
+
+# The covariates ARC ships in participants.tsv, in the column order
+# `encode_covariates` emits. Kept here so the script, the tests and the
+# residualisation all name the same three things.
+COVARIATE_COLUMNS = ("age_at_stroke", "sex", "wab_days")
+
+# The model used to remove a confound before an arm is scored on the residual.
+# hist_gb, not ridge, and that is not a detail: on ARC the volume-only arm
+# reaches R^2 0.398 with hist_gb against 0.335 with ridge, so a linear confound
+# model leaves nonlinear volume->outcome signal in the residual for the arm to
+# rediscover and look good on.
+CONFOUND_MODEL = "hist_gb"
 
 _GROUP_CACHE: dict[str, np.ndarray] = {}
 
@@ -115,6 +138,9 @@ class FeatureSet:
 
 FEATURE_SETS: dict[str, FeatureSet] = {
     "volume": FeatureSet("volume", "log lesion volume, one column", "control"),
+    "covariates": FeatureSet(
+        "covariates", "age at stroke, sex, log days post-stroke", "control"
+    ),
     "location": FeatureSet("location", "463-dim location atlas overlap (Model A)", "location"),
     "tracts": FeatureSet("tracts", "80-dim tract severance (Model B, primary)", "disconnection"),
     "network_edges": FeatureSet(
@@ -129,8 +155,48 @@ FEATURE_SETS: dict[str, FeatureSet] = {
 }
 
 
+def encode_covariates(table) -> np.ndarray:
+    """ARC's three covariates as a numeric matrix: age, sex indicator, log days.
+
+    `wab_days` is logged for the same reason lesion volume is -- it spans 42 to
+    7,998 days, so the untransformed column is a handful of extreme subjects and
+    a pile at the low end.
+
+    Missing values RAISE. Every other feature set here reads a cached array and
+    fails loudly if it is absent; a covariate quietly imputed to the cohort mean
+    would be the one feature in the comparison that had been invented, and it
+    would sit in the arm whose whole job is to be a control.
+    """
+    df = pd.DataFrame(table).reset_index(drop=True)
+    wanted = list(COVARIATE_COLUMNS)
+    missing = [c for c in wanted if c not in df.columns]
+    if missing:
+        raise KeyError(f"covariate table is missing {missing}; needs {wanted}")
+    empty = [c for c in wanted if df[c].isna().any()]
+    if empty:
+        raise ValueError(
+            f"missing covariate values in {empty} -- covariates are never imputed here"
+        )
+
+    sex = df["sex"].astype(str).str.strip().str.upper()
+    unknown = sorted(set(sex) - {"M", "F"})
+    if unknown:
+        raise ValueError(f"sex must be M or F, got {unknown}")
+    days = df["wab_days"].to_numpy(dtype=float)
+    if (days <= 0).any():
+        raise ValueError("non-positive wab_days -- cannot take a log")
+
+    return np.column_stack(
+        [
+            df["age_at_stroke"].to_numpy(dtype=float),
+            (sex == "F").to_numpy(dtype=float),
+            np.log(days),
+        ]
+    )
+
+
 def build_features(
-    subject_ids, which: str, feature_dir: Path | None = None, volumes=None
+    subject_ids, which: str, feature_dir: Path | None = None, volumes=None, covariates=None
 ) -> np.ndarray:
     """Stack one feature set across subjects. Missing files raise, never impute.
 
@@ -145,7 +211,7 @@ def build_features(
     if "+" in which:
         parts = [p.strip() for p in which.split("+")]
         return np.hstack(
-            [build_features(subject_ids, p, feature_dir, volumes) for p in parts]
+            [build_features(subject_ids, p, feature_dir, volumes, covariates) for p in parts]
         )
 
     if which not in FEATURE_SETS:
@@ -158,6 +224,17 @@ def build_features(
         if (v <= 0).any():
             raise ValueError("non-positive lesion volume")
         return np.log(v).reshape(-1, 1)
+
+    if which == "covariates":
+        if covariates is None:
+            raise ValueError("the covariate arm needs the covariate table passed in")
+        X = encode_covariates(covariates)
+        if len(X) != len(list(subject_ids)):
+            raise ValueError(
+                f"{len(X)} covariate rows against {len(list(subject_ids))} subjects -- the "
+                "table is positionally aligned to subject_ids and must be the same length"
+            )
+        return X
 
     rows = []
     for sid in subject_ids:
@@ -248,8 +325,27 @@ def evaluate(
     n_splits: int = DEFAULT_SPLITS,
     n_repeats: int = DEFAULT_REPEATS,
     seed: int = DEFAULT_SEED,
+    confounds: np.ndarray | None = None,
+    confound_model: str = CONFOUND_MODEL,
 ) -> Scores:
-    """Nested CV. The inner loop tunes; the outer loop scores. Never the same data."""
+    """Nested CV. The inner loop tunes; the outer loop scores. Never the same data.
+
+    `confounds` residualises the TARGET before the arm sees it, fold by fold. It
+    exists because the `volume+X` arms are a weak way to ask the incremental
+    question: on trees they can score *below* X alone, because the tree already
+    recovers volume from X and the extra column only costs it a split. The sharp
+    question is whether X predicts the part of the outcome that volume cannot.
+
+    The confound model is fitted on the TRAINING fold only and then applied to
+    both sides, so no test outcome touches the residual it is scored on. Fitting
+    it once on all 228 subjects -- the obvious implementation -- would leak the
+    test targets into the thing being predicted and inflate every arm at once.
+
+    **A residual R^2 is not comparable to a raw R^2.** Its denominator is the
+    variance of the residual, not of y. Read it only against other arms on the
+    same residual, where `<= 0` means the arm carries nothing the confound did
+    not already have.
+    """
     from sklearn.metrics import mean_absolute_error, r2_score
     from sklearn.model_selection import GridSearchCV, KFold, RepeatedKFold
 
@@ -262,22 +358,49 @@ def evaluate(
             f"split, and R^2 needs at least 2. Lower n_splits, or use a larger cohort."
         )
 
+    if confounds is not None:
+        confounds = np.asarray(confounds, dtype=np.float64)
+        if confounds.ndim == 1:
+            confounds = confounds.reshape(-1, 1)
+        if len(confounds) != len(y):
+            raise ValueError(
+                f"{len(confounds)} confound rows against {len(y)} subjects"
+            )
+
     estimator, grid = _model_grid(X.shape[1])[model]
+    inner = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
     outer = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=seed)
     r2s, maes = [], []
     for train, test in outer.split(X):
+        y_train, y_test = y[train], y[test]
+        if confounds is not None:
+            c_est, c_grid = _model_grid(confounds.shape[1])[confound_model]
+            nuisance = GridSearchCV(
+                c_est, c_grid, cv=inner, scoring="neg_mean_absolute_error", n_jobs=-1
+            )
+            nuisance.fit(confounds[train], y_train)
+            y_train = y_train - nuisance.predict(confounds[train])
+            y_test = y_test - nuisance.predict(confounds[test])
         search = GridSearchCV(
             estimator,
             grid,
-            cv=KFold(n_splits=n_splits, shuffle=True, random_state=seed),
+            cv=inner,
             scoring="neg_mean_absolute_error",
             n_jobs=-1,
         )
-        search.fit(X[train], y[train])
+        search.fit(X[train], y_train)
         pred = search.best_estimator_.predict(X[test])
-        r2s.append(r2_score(y[test], pred))
-        maes.append(mean_absolute_error(y[test], pred))
+        r2s.append(r2_score(y_test, pred))
+        maes.append(mean_absolute_error(y_test, pred))
     return Scores(feature_set, model, X.shape[0], X.shape[1], np.array(r2s), np.array(maes))
+
+
+def _cv_r2(estimator, grid, X: np.ndarray, target: np.ndarray, cv) -> float:
+    """One single-level CV score. Module level so joblib can ship it to a worker."""
+    from sklearn.model_selection import GridSearchCV, cross_val_score
+
+    search = GridSearchCV(estimator, grid, cv=cv, scoring="r2", n_jobs=1)
+    return float(np.mean(cross_val_score(search, X, target, cv=cv, scoring="r2", n_jobs=1)))
 
 
 def permutation_p(
@@ -287,6 +410,7 @@ def permutation_p(
     n_permutations: int = 200,
     n_splits: int = DEFAULT_SPLITS,
     seed: int = DEFAULT_SEED,
+    n_jobs: int = -1,
 ) -> tuple[float, float, np.ndarray]:
     """p-value for the observed R^2 against shuffled labels.
 
@@ -294,19 +418,32 @@ def permutation_p(
     200 nested runs is hours for a number whose job is to say "this could have
     happened by chance". The observed score is computed the same way, so the
     comparison is like-for-like even though it is not the headline R^2.
+
+    **Parallel over shuffles, serial within one.** The shuffles are the only
+    axis here that is actually wide: the inner grid is 6 points x 5 folds, so
+    farming that out leaves most of 16 cores idle and pays scheduler overhead
+    201 times over. Every permutation is drawn from `default_rng(seed)` in the
+    same order it was drawn serially, and each score depends on nothing but its
+    own target, so the null this returns is elementwise identical to the serial
+    one -- `n_jobs=1` reproduces it exactly and a test pins that.
+
+    There is no GPU path. `HistGradientBoostingRegressor` is CPU-only in
+    scikit-learn, and substituting a CUDA-capable booster would mean the null
+    validated a different model than the one that produced the headline R^2 --
+    which is the exact gap this run exists to close.
     """
-    from sklearn.model_selection import GridSearchCV, KFold, cross_val_score
+    from joblib import Parallel, delayed
+    from sklearn.model_selection import KFold
 
     estimator, grid = _model_grid(X.shape[1])[model]
     cv = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    search = GridSearchCV(estimator, grid, cv=cv, scoring="r2", n_jobs=-1)
 
-    def score(target):
-        return float(np.mean(cross_val_score(search, X, target, cv=cv, scoring="r2", n_jobs=1)))
-
-    observed = score(y)
+    observed = _cv_r2(estimator, grid, X, y, cv)
     rng = np.random.default_rng(seed)
-    null = np.array([score(rng.permutation(y)) for _ in range(n_permutations)])
+    shuffled = [rng.permutation(y) for _ in range(n_permutations)]
+    null = np.array(
+        Parallel(n_jobs=n_jobs)(delayed(_cv_r2)(estimator, grid, X, t, cv) for t in shuffled)
+    )
     p = float((1 + (null >= observed).sum()) / (1 + n_permutations))
     return observed, p, null
 
@@ -318,6 +455,9 @@ def compare(
     feature_sets: list[str] | None = None,
     models: list[str] | None = None,
     checkpoint_path: Path | None = None,
+    covariates=None,
+    confounds: np.ndarray | None = None,
+    residualised_on: str = "",
     **kwargs,
 ) -> pd.DataFrame:
     """Every (feature set x model) arm, with the volume control always included.
@@ -325,6 +465,12 @@ def compare(
     `checkpoint_path` writes the table after every arm. This run is hours long
     and unattended, and an arm that finishes at 01:30 should not be lost because
     a later one fails at 02:00.
+
+    `confounds` switches the whole table onto a residual target -- see
+    `evaluate`. The volume arm stays in even there, and it is the check that the
+    residualisation worked: predicting the volume-residual FROM volume must come
+    back at roughly zero, and anything else means the nuisance model left signal
+    behind or leaked.
     """
     wanted = list(feature_sets or ["location", "tracts", "network_edges"])
     if "volume" not in wanted:
@@ -333,16 +479,17 @@ def compare(
     rows = []
     folds: dict[tuple[str, str], np.ndarray] = {}
     for fs in wanted:
-        X = build_features(subject_ids, fs, volumes=volumes)
+        X = build_features(subject_ids, fs, volumes=volumes, covariates=covariates)
         available = _model_grid(X.shape[1])
         for model in models or list(available):
             if model not in available:
                 continue
             started = time.perf_counter()
-            scores = evaluate(X, y, fs, model, **kwargs)
+            scores = evaluate(X, y, fs, model, confounds=confounds, **kwargs)
             folds[(fs, model)] = scores.r2
             rows.append(scores.row())
             rows[-1]["fit_seconds"] = round(time.perf_counter() - started, 1)
+            rows[-1]["residualised_on"] = residualised_on
             print(
                 f"  {fs:26s} {model:12s} {rows[-1]['r2_median']:+.4f}"
                 f"   ({rows[-1]['fit_seconds']:.0f}s)",
@@ -354,6 +501,17 @@ def compare(
     out = pd.DataFrame(rows)
     out.attrs["fold_scores"] = folds  # for the paired comparison; see paired_table
     return out
+
+
+def is_control_arm(name: str) -> bool:
+    """True when every component of an arm is a control (volume, covariates).
+
+    `volume+tracts` is a thesis arm -- it carries a disconnection block.
+    `volume+covariates` is not; it is nuisance against nuisance.
+    """
+    parts = [p.strip() for p in str(name).split("+")]
+    kinds = [FEATURE_SETS[p].kind for p in parts if p in FEATURE_SETS]
+    return bool(kinds) and len(kinds) == len(parts) and all(k == "control" for k in kinds)
 
 
 def paired_table(
@@ -389,8 +547,12 @@ def paired_table(
         for base in baselines:
             # "volume vs location" is the mirror of "location vs volume" and adds
             # nothing; volume is the floor every arm is measured against, not an
-            # arm in its own right.
-            if arm == base or arm == "volume":
+            # arm in its own right. The same goes for any all-control arm -- a
+            # nuisance arm like `volume+covariates` is a question about
+            # confounds, and letting it in here would grow the Bonferroni
+            # denominator and make the thesis comparisons WORSE because a
+            # different question was also asked. Separate family, separate table.
+            if arm == base or is_control_arm(arm):
                 continue
             a = fold_scores[(arm, best_model[arm])]
             b = fold_scores[(base, best_model[base])]
@@ -415,6 +577,76 @@ def paired_table(
         # significant arm is not read as a result on its own.
         table["p_bonferroni"] = (table["p_wilcoxon"] * len(table)).clip(upper=1.0).round(4)
     return table
+
+
+def residual_verdict(results: pd.DataFrame, confound_name: str = "lesion volume") -> str:
+    """State the incremental comparison, on a target the confound has been removed from.
+
+    Deliberately a separate function from `verdict`, and deliberately its own
+    Bonferroni family. Folding these arms into `verdict`'s paired table would
+    grow that table's correction denominator and retroactively weaken the
+    published Phase 3 comparisons -- a result should not get worse because a
+    later question was asked.
+    """
+    scored = results[results["r2_median"].notna()]
+    lines = [
+        "",
+        f"residualised on {confound_name}: R^2 against the part of the outcome",
+        f"{confound_name} could NOT explain (fold-safe -- the nuisance model is fitted",
+        "on each training split only).",
+        "",
+        "  NOT comparable to the raw R^2 table: the denominator is the variance of",
+        "  the residual, not of y. <= 0 means the arm carries nothing new.",
+        "",
+    ]
+    if scored.empty:
+        return "\n".join([*lines, "  no arm produced a defined R^2"])
+
+    best = scored.loc[scored.groupby("feature_set")["r2_median"].idxmax()].set_index("feature_set")
+    for fs, r in best.sort_values("r2_median", ascending=False).iterrows():
+        lines.append(
+            f"  {fs:26s} {r['model']:12s} {r['r2_median']:+.4f}  "
+            f"[{r['r2_lo']:+.3f}, {r['r2_hi']:+.3f}]  {r['n_features']} features"
+        )
+
+    if "volume" in best.index:
+        v = best.loc["volume", "r2_median"]
+        lines += [
+            "",
+            f"  control -- volume predicting its own residual: {v:+.4f}. This should sit near",
+            "  zero. Far above it means the nuisance model left signal behind or leaked.",
+        ]
+
+    disc = [f for f in best.index if FEATURE_SETS.get(f) and FEATURE_SETS[f].kind == "disconnection"]
+    positive = [f for f in disc if best.loc[f, "r2_median"] > 0]
+    lines.append("")
+    if not disc:
+        lines.append("  no disconnection arm was run, so this says nothing about the thesis.")
+    elif not positive:
+        lines.append(
+            f"  **No disconnection arm predicts the {confound_name}-free residual at all.** "
+            "Every arm is at or below zero, which is a stronger statement than the raw table "
+            "supports: whatever these features carry, it is size."
+        )
+    else:
+        lines.append(
+            f"  Disconnection arms above zero on the residual: {', '.join(sorted(positive))}. "
+            f"That is information {confound_name} does not already have -- see the paired test "
+            "below for whether it beats the location baseline."
+        )
+
+    paired = paired_table(results.attrs.get("fold_scores", {}), results)
+    if paired.empty:
+        return "\n".join([*lines, "", "  (no paired comparison available)"])
+    lines += ["", "  paired across the identical outer folds, corrected within THIS family:", ""]
+    lines.append(f"    {'arm vs baseline':52s} {'diff':>8s} {'better':>9s} {'p':>8s} {'p(Bonf)':>9s}")
+    for _, r in paired.sort_values("p_wilcoxon").iterrows():
+        lines.append(
+            f"    {r['arm'] + ' vs ' + r['baseline']:52s} {r['median_diff']:+8.4f} "
+            f"{r['folds_better']:>4d}/{r['n_folds']:<4d} {r['p_wilcoxon']:8.4f} "
+            f"{r['p_bonferroni']:9.4f}"
+        )
+    return "\n".join(lines)
 
 
 def verdict(results: pd.DataFrame) -> str:

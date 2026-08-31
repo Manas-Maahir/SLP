@@ -1,5 +1,13 @@
 # ROADMAP.md
 
+> **Update, 2026-08-31.** Three of the four gaps `docs/PHASE3.md` listed are now closed, and
+> one of them was closed by discovering the question was wrong. **The covariates are nothing**
+> (R² −0.014 alone; they make `volume` worse). **Volume regressed out fold-safe takes every
+> arm to ≤ 0**, the location baseline included — a stronger and less flattering statement than
+> the raw table supported. And **"use more of ARC" is not available**: 902 is scanning
+> *sessions*, not participants. There are 245 participants, 228 have a lesion mask, and the
+> other 17 have no mask at all. **n = 228 is the entire labelled cohort**, not a sample of it.
+>
 > **Status, 2026-08-30 (late).** Phases 0, 1, 2 and 6 are done: a lesion mask goes in and
 > a disconnection profile and a readable report come out, over 108 real de-identified
 > lesions. **Phase 3 is no longer blocked on labels** — ARC's 228 labelled subjects were
@@ -187,6 +195,25 @@ Goal: answer *does disconnection beat location?* This is the go/no-go for the wh
 - [x] M4 shipped anyway: `src/lesionconn/predict.py` fits on all 228, persists, and
       `05_report.py` prints a predicted WAB-AQ — refusing outright for lesions outside the
       left-hemisphere aphasia distribution it was trained on.
+- [x] **Covariates added and measured: they are nothing.** age, sex and days post-stroke are
+      complete for 228/228. Alone they score R² −0.014; added to lesion volume they make it
+      *worse* (0.387 against 0.398). `wab_days` has partial r = −0.002 given volume — ARC is a
+      chronic cohort at a median 721 days, so recovery has plateaued. The nominally significant
+      sex effect is a volume confound.
+- [x] **Volume regressed out fold-safe, not merely reported.** Every arm, and all 18
+      (feature set × model) cells, score at or below zero on the volume-free residual —
+      the location baseline included.
+- [ ] **Permutation null on the tree models — 1 of 6 arms done.** `permutation_p` now takes a
+      model name and is parallelised over shuffles (37 → 13 min per arm, verified elementwise
+      identical). The `volume` control passes: observed +0.416 against a null median of −0.104,
+      p = 0.005, the 1/201 floor. The four disconnection arms are NOT yet shuffled, so the gap
+      in [docs/PHASE3.md](docs/PHASE3.md) is **not closed**. Resume with
+      `19_train.py ... --permutations 200 --permutation-model hist_gb` — it skips arms already
+      on disk.
+- [x] Status deck for a non-specialist audience: `docs/Lesion_Disconnection_Status.pptx`,
+      15 slides, built from the result CSVs by a script so the numbers cannot drift from the
+      data. Emitting it exposed **docs/BUGS.md B9** — a ZIP container was invisible to the
+      de-identification scan.
 
 Superseded checklist (kept for the record):
 - [ ] Model A (baseline): location features → outcome. Ridge / elastic-net / GBT.

@@ -170,6 +170,46 @@ def _png_searchable(raw: bytes) -> bytes | None:
     return bytes(out)
 
 
+def _zip_searchable(raw: bytes) -> bytes | None:
+    """Every member of a ZIP container, decompressed. None if not a ZIP.
+
+    A .pptx / .docx / .xlsx is a ZIP, and so is a plain .zip. Byte-grepping the
+    archive itself reads deflate output, which is noise -- a patient name in a
+    slide would be completely invisible. This is the same blind spot the .npy and
+    PNG narrowings were *measured* against, except here nothing was searched at
+    all rather than too much.
+
+    Members are run back through the per-format narrowings, so a PNG embedded in
+    a deck is treated exactly like a PNG on disk: text chunks searched, IDAT
+    dropped as the coincidence source docs/BUGS.md B8 measured it to be.
+    """
+    import io
+    import zipfile
+
+    if raw[:4] not in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"):
+        return None
+    out = bytearray()
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            for info in z.infolist():
+                if info.file_size > MAX_BYTES:
+                    continue
+                try:
+                    member = z.read(info)
+                except (zipfile.BadZipFile, RuntimeError, OSError):
+                    continue
+                out += info.filename.encode("utf-8", "replace") + b"\n"
+                narrowed = next(
+                    (n for n in (_npy_searchable(member), _png_searchable(member))
+                     if n is not None),
+                    member,
+                )
+                out += narrowed + b"\n"
+    except (zipfile.BadZipFile, OSError):
+        return None
+    return bytes(out)
+
+
 def _read_bytes(path: Path) -> bytes:
     if path.stat().st_size > MAX_BYTES:
         return b""
@@ -184,6 +224,7 @@ def _read_bytes(path: Path) -> bytes:
         _npy_searchable(raw),
         _npz_searchable(raw),
         _png_searchable(raw),
+        _zip_searchable(raw),
     ):
         if narrow is not None:
             return narrow
@@ -401,3 +442,39 @@ def test_a_non_npy_zip_is_still_searched_whole(tmp_path):
         # the content is glued to "PK" and has no word boundary after it.
         z.writestr("notes.txt", "patient Jane, admitted.")
     assert pattern.search(_read_bytes(path))
+
+
+def test_zip_container_members_are_searched(tmp_path):
+    """A .pptx is a ZIP, and a name inside one was invisible to a byte grep.
+
+    This project now emits a slide deck into docs/. Without decompressing the
+    archive the repo-wide scan reads deflate output and passes every time --
+    the one failure mode this whole test module exists to prevent, reintroduced
+    by a new file format rather than by new data.
+    """
+    import zipfile
+
+    name = "Wintergreen"
+    pattern = re.compile(re.escape(name).encode(), re.IGNORECASE)
+
+    clean = tmp_path / "clean.pptx"
+    with zipfile.ZipFile(clean, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("ppt/slides/slide1.xml", "<p:sld>lesion volume alone</p:sld>")
+    assert not pattern.search(_read_bytes(clean))
+
+    leaky = tmp_path / "leaky.pptx"
+    with zipfile.ZipFile(leaky, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("ppt/slides/slide1.xml", f"<p:sld>subject {name} scored 41</p:sld>")
+    raw = leaky.read_bytes()
+    assert not pattern.search(raw), "precondition: deflate hides the name from a raw grep"
+    assert pattern.search(_read_bytes(leaky)), "a name in a deck slide must be found"
+
+
+def test_zip_narrowing_does_not_swallow_npz(tmp_path):
+    """An .npz is also a ZIP. It must keep its own, stricter handling."""
+    import numpy as np
+
+    path = tmp_path / "m.npz"
+    np.savez(path, a=np.arange(8, dtype=np.float32))
+    raw = path.read_bytes()
+    assert _npz_searchable(raw) is not None, "npz must be claimed before the zip rule"
