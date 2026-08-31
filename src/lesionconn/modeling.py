@@ -36,6 +36,7 @@ a serious arm, and `network_edges` is the honest matrix-derived feature set.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -316,23 +317,104 @@ def compare(
     volumes,
     feature_sets: list[str] | None = None,
     models: list[str] | None = None,
+    checkpoint_path: Path | None = None,
     **kwargs,
 ) -> pd.DataFrame:
-    """Every (feature set x model) arm, with the volume control always included."""
+    """Every (feature set x model) arm, with the volume control always included.
+
+    `checkpoint_path` writes the table after every arm. This run is hours long
+    and unattended, and an arm that finishes at 01:30 should not be lost because
+    a later one fails at 02:00.
+    """
     wanted = list(feature_sets or ["location", "tracts", "network_edges"])
     if "volume" not in wanted:
         wanted.insert(0, "volume")  # the confound arm is not optional
 
     rows = []
+    folds: dict[tuple[str, str], np.ndarray] = {}
     for fs in wanted:
         X = build_features(subject_ids, fs, volumes=volumes)
         available = _model_grid(X.shape[1])
         for model in models or list(available):
             if model not in available:
                 continue
-            rows.append(evaluate(X, y, fs, model, **kwargs).row())
-            print(f"  {fs:26s} {model:12s} {rows[-1]['r2_median']:+.4f}")
-    return pd.DataFrame(rows)
+            started = time.perf_counter()
+            scores = evaluate(X, y, fs, model, **kwargs)
+            folds[(fs, model)] = scores.r2
+            rows.append(scores.row())
+            rows[-1]["fit_seconds"] = round(time.perf_counter() - started, 1)
+            print(
+                f"  {fs:26s} {model:12s} {rows[-1]['r2_median']:+.4f}"
+                f"   ({rows[-1]['fit_seconds']:.0f}s)",
+                flush=True,
+            )
+            if checkpoint_path is not None:
+                checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame(rows).to_csv(checkpoint_path, index=False)
+    out = pd.DataFrame(rows)
+    out.attrs["fold_scores"] = folds  # for the paired comparison; see paired_table
+    return out
+
+
+def paired_table(
+    fold_scores: dict[tuple[str, str], np.ndarray],
+    results: pd.DataFrame,
+) -> pd.DataFrame:
+    """Compare arms fold by fold, which is the comparison the design supports.
+
+    `RepeatedKFold` runs with a fixed seed, so every arm is scored on the
+    *identical* 25 outer splits. That makes the comparison paired, and a paired
+    test is far more powerful -- and far more honest -- than noting that two
+    marginal 95% intervals happen to be ordered. On 228 subjects those intervals
+    span roughly [0.2, 0.65] for every arm and overlap almost completely, so
+    ranking medians alone will call a coin flip a finding.
+
+    One row per (arm vs baseline) pair, using each feature set's best model.
+    """
+    from scipy.stats import wilcoxon
+
+    scored = results[results["r2_median"].notna()]
+    if scored.empty or not fold_scores:
+        return pd.DataFrame()
+    best_model = (
+        scored.loc[scored.groupby("feature_set")["r2_median"].idxmax()]
+        .set_index("feature_set")["model"]
+        .to_dict()
+    )
+    arms = [f for f in best_model if (f, best_model[f]) in fold_scores]
+    baselines = [b for b in ("volume", "location") if b in arms]
+
+    rows = []
+    for arm in arms:
+        for base in baselines:
+            # "volume vs location" is the mirror of "location vs volume" and adds
+            # nothing; volume is the floor every arm is measured against, not an
+            # arm in its own right.
+            if arm == base or arm == "volume":
+                continue
+            a = fold_scores[(arm, best_model[arm])]
+            b = fold_scores[(base, best_model[base])]
+            keep = np.isfinite(a) & np.isfinite(b)
+            if keep.sum() < 5:
+                continue
+            d = a[keep] - b[keep]
+            rows.append(
+                {
+                    "arm": arm,
+                    "baseline": base,
+                    "model": best_model[arm],
+                    "median_diff": round(float(np.median(d)), 4),
+                    "folds_better": int((d > 0).sum()),
+                    "n_folds": int(keep.sum()),
+                    "p_wilcoxon": round(float(wilcoxon(a[keep], b[keep]).pvalue), 4),
+                }
+            )
+    table = pd.DataFrame(rows)
+    if not table.empty:
+        # Bonferroni over the comparisons actually made, so a nominally
+        # significant arm is not read as a result on its own.
+        table["p_bonferroni"] = (table["p_wilcoxon"] * len(table)).clip(upper=1.0).round(4)
+    return table
 
 
 def verdict(results: pd.DataFrame) -> str:
@@ -399,7 +481,48 @@ def verdict(results: pd.DataFrame) -> str:
         )
     else:
         lines.append(
-            f"  Disconnection ({b:+.4f}) beats both volume ({vol:+.4f}) and location "
-            f"({loc:+.4f}). Confirm with the permutation null before believing it."
+            f"  Point estimates order disconnection ({b:+.4f}) above location ({loc:+.4f}) "
+            f"and volume ({vol:+.4f}) -- but see the paired test below before reading that "
+            "as a result."
+        )
+
+    # The ordering above compares medians of heavily overlapping distributions.
+    # The folds are identical across arms, so the paired test is the one that
+    # decides, and it is printed last because it is what should be quoted.
+    paired = paired_table(results.attrs.get("fold_scores", {}), results)
+    if paired.empty:
+        lines.append("")
+        lines.append(
+            "  No paired comparison available (fold scores not retained), so the ordering "
+            "above is a ranking of point estimates and nothing more."
+        )
+        return "\n".join(lines)
+
+    lines += ["", "  paired across the identical outer folds -- THIS is the comparison:", ""]
+    lines.append(
+        f"    {'arm vs baseline':52s} {'diff':>8s} {'better':>9s} {'p':>8s} {'p(Bonf)':>9s}"
+    )
+    for _, r in paired.sort_values("p_wilcoxon").iterrows():
+        lines.append(
+            f"    {r['arm'] + ' vs ' + r['baseline']:52s} {r['median_diff']:+8.4f} "
+            f"{r['folds_better']:>4d}/{r['n_folds']:<4d} {r['p_wilcoxon']:8.4f} "
+            f"{r['p_bonferroni']:9.4f}"
+        )
+
+    survives = paired[(paired["p_bonferroni"] < 0.05) & (paired["median_diff"] > 0)]
+    beats_location = survives[survives["baseline"] == "location"]
+    lines.append("")
+    if beats_location.empty:
+        lines.append(
+            "  **B is not distinguishable from A.** No disconnection arm beats the location "
+            "baseline once the comparison is paired and corrected. The roadmap's Phase 3 exit "
+            "for this is 'B ~= A -- dig into representation before declaring anything', not a "
+            "win."
+        )
+    else:
+        arms = ", ".join(sorted(set(beats_location["arm"])))
+        lines.append(
+            f"  **B > A survives the paired, corrected test** for: {arms}. That is the thesis "
+            "holding, on this cohort, with this registration."
         )
     return "\n".join(lines)

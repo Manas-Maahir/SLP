@@ -90,10 +90,14 @@ def main() -> int:
     print(header)
     print(f"\ny: mean {y.mean():.2f}  sd {y.std():.2f}  range [{y.min():.2f}, {y.max():.2f}]\n")
 
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    out = RESULTS_DIR / f"{args.cohort}_{args.target}_results.csv"
+
     results = md.compare(
         ids,
         y,
         volumes,
+        checkpoint_path=out,  # every arm is written as it lands
         feature_sets=args.feature_sets,
         models=args.models,
         n_repeats=args.repeats,
@@ -111,8 +115,6 @@ def main() -> int:
                 f"  {fs:26s} observed R^2 {obs:+.4f}   null median {np.median(null):+.4f}   p={p:.4f}"
             )
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out = RESULTS_DIR / f"{args.cohort}_{args.target}_results.csv"
     text = results.to_csv(index=False)
     from lesionconn import deid
 
