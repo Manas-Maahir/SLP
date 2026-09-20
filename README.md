@@ -6,7 +6,8 @@ white-matter connections it severs — which then predicts clinical outcome.
 Design docs: [plan.md](plan.md) (what and why) · [ARCHITECTURE.md](ARCHITECTURE.md) (the five
 modules) · [ROADMAP.md](ROADMAP.md) (phases, and what each one found) ·
 [docs/DISCONNECTION.md](docs/DISCONNECTION.md) (**read before using the matrix**) ·
-[docs/LITERATURE.md](docs/LITERATURE.md) (does the published field agree? — largely yes).
+[docs/LITERATURE.md](docs/LITERATURE.md) (does the published field agree? — largely yes) ·
+[docs/DEMO.md](docs/DEMO.md) (**runbook for showing this live**).
 
 > Research annotation / analysis tool. **Not a diagnostic device.**
 
