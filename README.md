@@ -94,8 +94,9 @@ cd scripts
 ../.venv/Scripts/python.exe 19_train.py --target volume            # harness check
 ../.venv/Scripts/python.exe 19_train.py --target wab_aq --cohort arc  # the thesis test
 ../.venv/Scripts/python.exe 19_train.py --target wab_aq --cohort arc --residualise volume
-# the permutation null, on the family the headline numbers come from (~3h, resumable)
+# the permutation null, on the family the headline numbers come from (107 min, resumable)
 ../.venv/Scripts/python.exe 19_train.py --target wab_aq --cohort arc --models hist_gb \
+    --feature-sets location tracts network_edges network_edges_streamline covariates \
     --out-suffix nullrun --permutations 200 --permutation-model hist_gb
 ../.venv/Scripts/python.exe 20_fit_model.py           # fit + persist the final models
 

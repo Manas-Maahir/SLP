@@ -203,13 +203,24 @@ Goal: answer *does disconnection beat location?* This is the go/no-go for the wh
 - [x] **Volume regressed out fold-safe, not merely reported.** Every arm, and all 18
       (feature set × model) cells, score at or below zero on the volume-free residual —
       the location baseline included.
-- [ ] **Permutation null on the tree models — 1 of 6 arms done.** `permutation_p` now takes a
-      model name and is parallelised over shuffles (37 → 13 min per arm, verified elementwise
-      identical). The `volume` control passes: observed +0.416 against a null median of −0.104,
-      p = 0.005, the 1/201 floor. The four disconnection arms are NOT yet shuffled, so the gap
-      in [docs/PHASE3.md](docs/PHASE3.md) is **not closed**. Resume with
-      `19_train.py ... --permutations 200 --permutation-model hist_gb` — it skips arms already
-      on disk.
+- [x] **Permutation null on the tree models — all 6 arms done, and the gap is closed.**
+      `permutation_p` takes a model name and is parallelised over shuffles (verified
+      elementwise identical to the serial version). 200 shuffles per arm on `hist_gb`, the
+      family the headline numbers come from. **All five real arms reach p = 0.005**, the 1/201
+      floor — counted network edges +0.5104, location +0.4487, tracts +0.4340, inferred network
+      edges +0.4325, volume +0.4160 — each against a shuffled median near −0.21. **The
+      `covariates` control does not**: −0.1347 at p = 0.4527, indistinguishable from its own
+      null, which is what makes the other five readable. Bonferroni over the 6-test family is
+      0.03, so all five survive. Full table: [docs/PHASE3.md](docs/PHASE3.md).
+
+      This does **not** touch the Phase 3 answer. Every arm beats chance; none beats another.
+      B ≈ A is decided by the paired Wilcoxon, not by this.
+
+      106.7 minutes of compute, unevenly spread: `location` alone is 74.7 of it at 463
+      features, against 4.2 for the 80-dim tract vector. Cost grows faster than feature count,
+      so estimates scaled linearly from single-fit times come out ~2× optimistic — the
+      checkpoint-per-arm design is what made a run that was killed twice by session teardown
+      recoverable both times.
 - [x] Status deck for a non-specialist audience: `docs/Lesion_Disconnection_Status.pptx`,
       15 slides, built from the result CSVs by a script so the numbers cannot drift from the
       data. Emitting it exposed **docs/BUGS.md B9** — a ZIP container was invisible to the

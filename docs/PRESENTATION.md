@@ -320,24 +320,34 @@ number is that sensitive to how you ran it."
 
 ---
 
-## Slide 13 — In progress (1 minute)
+## Slide 13 — Permutation test (1 minute 30)
 
-> Be straight about this. Do not imply it is finished.
+> This is the slide that answers "how do you know any of this is real?".
+> Point at the control row, not the top row.
 
-"One thing is genuinely incomplete, and I'd rather say so than have it found.
+"Everything I've shown you so far is a comparison between models. This slide asks
+a more basic question: is any of it real at all?
 
-There's a validation test that shuffles the outcome labels randomly and checks the
-model can't predict noise. The existing version uses a linear model, which is
-unstable on these features — so it validates the linear results, not the
-tree-based models that produce every number I've shown you.
+The test is simple. Take the language scores, shuffle them randomly between
+patients so the connection between brain and outcome is destroyed, and re-run the
+whole thing. Do that two hundred times per model. If a model still appears to
+work on shuffled data, it was never working.
 
-I've rewritten it to run on the correct models and made it about three times
-faster. The control model passes cleanly: it scores 0.42 on real data against
-minus 0.10 on shuffled data, with the lowest p-value the test can produce.
+None of them did. Every feature set scores around plus 0.43 to plus 0.51 on real
+data, and around minus 0.21 on shuffled data. Not one shuffle in two hundred came
+close to the real score — that's the 0.005, and it's the smallest number this test
+can produce.
 
-But only one of six models has finished. So the accurate statement is:
-implemented, validated on the control, currently incomplete. Roughly 80 minutes
-of computing left, and it resumes where it stopped."
+The row to look at is the last one. Age, sex and time since stroke score minus
+0.13 on real data against minus 0.14 shuffled — indistinguishable. That's the
+control, and it's deliberately in there. If demographics had come back looking
+significant, I'd know the test was manufacturing results and I couldn't trust any
+of the rows above it. It didn't, so I can.
+
+One thing this does not say: it does not say disconnection beats location. Each
+model is tested against randomness, never against another model. Four feature sets
+all clearing the same bar is exactly what you'd expect when all four are largely
+measuring lesion size."
 
 ---
 
@@ -345,15 +355,21 @@ of computing left, and it resumes where it stopped."
 
 "In priority order.
 
-Finish that validation test. Then hold out a genuine test set — right now every
-number I've shown is cross-validated on the same 228 patients, which is standard
-but not the same as a clean test set. Then compare alternative registration
-methods, because I accepted the current one on a good score without checking
-whether something else is better.
+Hold out a genuine test set. Right now every number I've shown is cross-validated
+on the same 228 patients, which is standard practice but is not the same as a
+clean test set. I want to be honest that this one is hard rather than just undone
+— 228 is few enough that setting a fifth of them aside would leave the comparison
+too weak to mean anything. It's a real limitation and I'd rather state it than
+paper over it.
 
-The two items at the bottom came *off* the list. Getting more patients turned out
-to be impossible, and the demographic covariates turned out to be nothing. Both
-were removed by measuring, not by deciding."
+Then compare alternative registration methods, because I accepted the current one
+on a good score without checking whether something else is better. Then lesion
+filling. Then wire the results into the viewer.
+
+Three items came *off* this list, and all three came off by measuring rather than
+deciding. Getting more patients turned out to be impossible. The demographic
+covariates turned out to be nothing. And the validation test — the one I flagged
+as incomplete on the last slide — is now finished on all six models."
 
 ---
 

@@ -181,8 +181,52 @@ nonzero, and `StandardScaler` amplifies exactly that.
 `hist_gb` was stable in every arm (25/25 folds positive, every lower bound ≥ 0.20), which is
 why the paired test uses it.
 
-**The consequence is a real gap:** the permutation null validates the *linear* arms and not
-the boosted-tree arms that produce the headline numbers. It is not closed.
+~~**The consequence is a real gap:** the permutation null validates the *linear* arms and not
+the boosted-tree arms that produce the headline numbers. It is not closed.~~ **Closed** — see
+below.
+
+## The null, on the models the headline numbers come from
+
+200 shuffles per arm, `hist_gb`, the same family the paired test uses. 106.7 minutes of
+compute, checkpointed per arm; a session ending under it killed the run twice and it resumed
+from disk both times.
+
+| arm | features | observed R² | shuffled median | shuffled p95 | p | minutes |
+|---|---|---|---|---|---|---|
+| network edges, counted | 136 | **+0.5104** | −0.2044 | −0.1087 | **0.005** | 10.7 |
+| location — Model A | 463 | +0.4487 | −0.2068 | −0.0748 | **0.005** | 74.7 |
+| tract severance — Model B | 80 | +0.4340 | −0.2061 | −0.0881 | **0.005** | 4.2 |
+| network edges, inferred | 136 | +0.4325 | −0.2070 | −0.0817 | **0.005** | 12.0 |
+| lesion volume | 1 | +0.4160 | −0.1036 | −0.0391 | **0.005** | 3.3 |
+| *covariates — the control* | *3* | *−0.1347* | *−0.1406* | *−0.0504* | *0.4527* | *1.8* |
+
+**p = 0.005 is the floor**, `(1 + 0)/(1 + 200)`: not one shuffle in 200 reached the observed
+score for any of the five real arms. The family here is 6 tests, so Bonferroni gives
+0.005 × 6 = 0.03 — all five survive correction, and the family size is stated because the
+section above this document's paired table exists entirely about how easily it moves.
+
+**Read the control row first.** `covariates` lands at p = 0.45, and it must: its observed score
+is −0.1347, indistinguishable from its own shuffled median of −0.1406. A harness that returned
+a small p for age, sex and days-post-stroke would be manufacturing signal, and every other row
+here would be void. This was written down as a prediction before the arm ran.
+
+**The thrown-out result is explained rather than merely retracted.** `network_edges_streamline`
+scored −0.119 at p = 0.84 under ridge. Under `hist_gb` the same features, the same shuffles and
+the same seed give **+0.5104 at p = 0.005**. Nothing about the data changed; the column-scaling
+pathology described above was the whole of it.
+
+**Observed here ≠ the headline R².** `permutation_p` scores with single-level CV tuned on R²,
+while the table at the top of this document is nested CV tuned on MAE. The two agree to within
+0.037 across all six arms (largest divergences: `covariates` −0.037, `network_edges` −0.033,
+`network_edges_streamline` +0.030). They are the same quantity measured two ways, not a
+discrepancy.
+
+**What this closes, and what it does not.** It closes the gap: the boosted-tree arms that
+produce every headline number are now shown to beat randomised outcomes, decisively. It says
+**nothing about B vs A** — each arm is tested against chance, never against another arm. The
+Phase 3 answer is still **B ≈ A**, and it is still the paired Wilcoxon over identical folds
+that decides it. A permutation p of 0.005 on four different feature sets is exactly what you
+would expect from four feature sets that are all largely measuring lesion size.
 
 ## What this means for Phase 5
 
@@ -206,7 +250,8 @@ the boosted-tree arms that produce the headline numbers. It is not closed.
   > sample of it. More subjects means a *different* cohort — and ATLAS, the one with 1,453
   > scans, is the one that withholds outcome scores (ROADMAP Phase 0). Counting the masks
   > costs one command and would have caught this before it was written down.
-- **A permutation null on the tree models** would close the gap above.
+- ~~**A permutation null on the tree models** would close the gap above.~~ **Done.** All five
+  real arms reach the 1/201 floor and the control does not; see the table above.
 
 ## What was NOT done
 
@@ -220,3 +265,8 @@ the boosted-tree arms that produce the headline numbers. It is not closed.
   this is now the *only* one of the four original gaps still open, because it is the one that
   n = 228 makes expensive rather than merely undone. Holding out 20% costs the comparison the
   power it already does not have.
+
+  > **Correction.** "The only one still open" was written while the permutation null was
+  > outstanding, so it was not true when written — there were two. With the null closed it is
+  > now accurate. Recorded rather than quietly corrected, because a document that silently
+  > becomes right is indistinguishable from one that was never wrong.

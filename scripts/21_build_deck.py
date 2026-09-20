@@ -167,6 +167,20 @@ def charts() -> None:
     plt.close(fig)
 
 
+def permutation_rows() -> dict[str, dict[str, str]]:
+    """Slide 13's numbers, read from the null the harness wrote.
+
+    They were typed by hand while the run was still incomplete -- the one place
+    this module's opening promise was not kept, and it went stale the moment the
+    remaining arms landed. csv rather than pandas because pandas is imported
+    inside charts() and nothing else at module scope needs it.
+    """
+    import csv
+
+    with (MODELING / "arc_wab_aq_permutation.csv").open(newline="", encoding="utf-8") as fh:
+        return {r["feature_set"]: r for r in csv.DictReader(fh)}
+
+
 charts()
 
 prs = Presentation()
@@ -490,39 +504,57 @@ tb(s, Inches(.7), Inches(6.35), Inches(11.9), Inches(.7),
    "p-values in a favourable direction. No result is significant at either count.",
    size=13.5, bold=True, color=ACCENT, line=1.35)
 
-# ---------------------------------------------------------------- 13 in flight
-s = new("In progress", "Permutation test on the tree-based models")
-tb(s, Inches(.7), Inches(1.95), Inches(11.9), Inches(1.2),
-   "The existing permutation test uses a linear model, which is unstable on these "
-   "features. It therefore validates the linear results rather than the tree-based models "
-   "that produce the reported figures.", size=16, line=1.35)
-card(s, Inches(.7), Inches(3.3), Inches(2.7), Inches(1.65), "0.416", "observed score\nvolume model", ACCENT)
-card(s, Inches(3.6), Inches(3.3), Inches(2.7), Inches(1.65), "-0.104", "median under\n200 permutations", MUTED)
-card(s, Inches(6.5), Inches(3.3), Inches(2.7), Inches(1.65), "0.005", "p-value\nlowest attainable", GOOD)
-card(s, Inches(9.4), Inches(3.3), Inches(2.7), Inches(1.65), "1 of 6", "models complete", WARN)
-tb(s, Inches(.7), Inches(5.25), Inches(11.9), Inches(1.3),
-   "The test now runs on the tree-based models and is validated on the control model. The "
-   "four disconnection models have not yet been run.\n"
-   "Accurate summary: implemented and validated, currently incomplete.",
-   size=14.5, line=1.4)
-tb(s, Inches(.7), Inches(6.55), Inches(11.9), Inches(.6),
-   "Runtime reduced from 37 to 13 minutes per model by parallelising, with results "
-   "confirmed identical to the serial version. The work is checkpointed and can resume "
-   "where it stopped.", size=12, color=MUTED, line=1.3)
+# ---------------------------------------------------------------- 13 permutation
+s = new("Permutation test", "Every feature set beats randomised outcomes; the control does not")
+tb(s, Inches(.7), Inches(1.78), Inches(11.9), Inches(.5),
+   "Each feature set is re-scored 200 times with the outcome scores shuffled between "
+   "subjects. A model that only appears to work scores the same either way.", size=15.5,
+   line=1.3)
+
+_perm = permutation_rows()
+_plabel = [
+    ("network_edges_streamline", "network edges, counted (136)"),
+    ("network_edges", "network edges, inferred (136)"),
+    ("location", "location baseline (463)"),
+    ("tracts", "tract severance (80)"),
+    ("volume", "lesion volume (1)"),
+    ("covariates", "age, sex, time (3)   <- control"),
+]
+_prows, _pcolors = [], []
+for _k, _lab in _plabel:
+    _r = _perm.get(_k)
+    if _r is None:  # an arm not yet shuffled renders as absent, never as a zero
+        continue
+    _prows.append([_lab, f"{float(_r['observed_r2']):+.3f}",
+                   f"{float(_r['null_median']):+.3f}", f"{float(_r['p']):.3f}"])
+    _pcolors.append(GOOD if float(_r["p"]) <= 0.05 else MUTED)
+_PTOP = 2.34
+table(s, Inches(.7), Inches(_PTOP), [Inches(4.3), Inches(2.3), Inches(2.3), Inches(1.5)],
+      ["FEATURE SET", "OBSERVED", "SHUFFLED (MEDIAN)", "P"], _prows, row_colors=_pcolors)
+# Derived from the row count, not hardcoded: this table grew from 1 arm to 6 as the null
+# finished, and a fixed footnote position collided with the sixth row.
+_pbottom = _PTOP + .68 + .6 * (len(_prows) - 1) + .5
+tb(s, Inches(.7), Inches(_pbottom + .1), Inches(11.9), Inches(.55),
+   "0.005 is the lowest value 200 shuffles can produce. The control row is the one to read "
+   "first: age, sex and time since stroke score no better than their own shuffled version, "
+   "which is what makes the other five readable. This establishes that each feature set "
+   "carries real signal. It does not rank them against each other.",
+   size=12.5, color=MUTED, line=1.3)
+
 
 # ---------------------------------------------------------------- 14 next
 s = new("Next steps", "In priority order")
 bullets(s, Inches(.7), Inches(2.0), Inches(11.9), [
-    "1. Complete the permutation test |  roughly 80 minutes of computation. Closes the last of the four documented gaps.",
-    "2. Hold out a test set |  the remaining open item. All current figures are cross-validated on the same 228 subjects.",
-    "3. Compare alternative registration methods |  the current method was accepted on a Dice of 0.924, which does not establish that it is the best option.",
-    "4. Test lesion-filling during registration |  a stronger alternative to the current approach.",
-    "5. Display disconnection results in the viewer |  the export path has not yet been tested against a running instance.",
+    "1. Hold out a test set |  the one remaining gap in the analysis. All current figures are cross-validated on the same 228 subjects, and 228 is too few to spend on a holdout without losing the comparison entirely.",
+    "2. Compare alternative registration methods |  the current method was accepted on a Dice of 0.924, which does not establish that it is the best option.",
+    "3. Test lesion-filling during registration |  a stronger alternative to the current approach.",
+    "4. Display disconnection results in the viewer |  the export path has not yet been tested against a running instance.",
 ], size=15, gap=15)
 rule(s, Inches(.7), Inches(5.8), Inches(11.9))
 tb(s, Inches(.7), Inches(6.0), Inches(11.9), Inches(1.0),
+   "Completed since this list was written: the permutation test, now run on all six models. "
    "Removed from the plan: increasing the ARC sample, which is not possible, and adding "
-   "demographic covariates, which has been completed. Both were resolved by measurement.",
+   "demographic covariates, which changed nothing. All three were resolved by measurement.",
    size=14, bold=True, color=ACCENT, line=1.4)
 
 # ---------------------------------------------------------------- 15 close
@@ -545,6 +577,17 @@ tb(s, Inches(.7), Inches(6.7), Inches(11.9), Inches(.5),
 
 out = ROOT / "docs" / "Lesion_Disconnection_Status.pptx"
 out.parent.mkdir(parents=True, exist_ok=True)
+# Every shape inside the canvas. The deck has twice shipped a box running off the
+# bottom -- see picture() and bullets() -- and "zero structural layout problems" was
+# a claim checked by eye until now.
+_over = [
+    (i, sh.shape_type, round(sh.left / 914400, 2), round(sh.top / 914400, 2))
+    for i, sl in enumerate(prs.slides, 1) for sh in sl.shapes
+    if sh.top + sh.height > prs.slide_height or sh.left + sh.width > prs.slide_width
+]
+if _over:
+    raise SystemExit(f"shapes outside the canvas: {_over}")
+
 prs.save(str(out))
 print("slides:", len(prs.slides._sldIdLst))
 print("->", out)
