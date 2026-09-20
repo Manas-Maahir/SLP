@@ -1,447 +1,435 @@
-# Presentation script — Lesion → Disconnection → Outcome
+# Presentation script
 
-A speaking script for explaining this project to someone who has never seen it.
-Roughly 15 minutes plus questions. Stage directions are in `>` blockquotes.
+A slide-by-slide script for `Lesion_Disconnection_Status.pptx` (15 slides).
+About 15 minutes, plus questions. Stage directions are in `>` blockquotes;
+everything else is meant to be said more or less as written.
 
-**The one-line frame, and the thing to hold onto for the whole talk:**
+**The frame to hold for the whole talk:**
 
-> I built the pipeline, I tested the thesis honestly, and the thesis lost.
-> Here is how I know — and here is the machinery that caught six of my own
-> errors on the way there.
+> I built the pipeline, I tested the idea properly, and the idea did not hold up.
+> Here is how I know that, and here is why the way I checked matters.
 
-Do not try to sell disconnection as a win. The point estimates rank it first,
-and this project proved that ranking is a coin flip. The negative result, with
-this much instrumentation behind it, is the stronger talk and it is much harder
-to attack in questions.
-
----
-
-## 0 — Setup (30 seconds)
-
-> No slide yet. Just say it.
-
-"A stroke destroys a piece of brain tissue. The obvious question a clinician
-asks is *where* — which region died. But a brain region is only useful because
-it is connected to other regions, and a lesion also cuts the white-matter
-cables running underneath it. So there is a competing hypothesis: what predicts
-a patient's deficit is not *where* the damage is, but *which connections it
-severs*.
-
-That is a testable claim. This project tests it."
+Do not try to sell disconnection as a win. The point estimates rank it first, and
+one of the slides exists specifically to show that ranking is unreliable. The
+negative result, with this much checking behind it, is the stronger talk and it
+is much harder to attack in questions.
 
 ---
 
-## 1 — The question (1 minute)
+## Slide 1 — Title (30 seconds)
 
-> Slide: the question, and the two feature sets side by side.
+> Do not read the slide. Say this and move on.
 
-"The outcome I predict is the **Western Aphasia Battery Aphasia Quotient** — a
-0 to 100 language score. The cohort is **ARC**, a public dataset: 245
-participants, 228 of whom have both a lesion mask and a WAB score. Mean 63,
-standard deviation 28, full range 5 to 100.
+"This project asks whether we can predict how badly a stroke affects someone's
+language by looking at which brain connections the stroke cut, rather than just
+where it happened.
 
-Two models compete on identical data.
-
-**Model A, the baseline — location.** A 463-region atlas. How much of each
-region does this lesion destroy?
-
-**Model B, the thesis — disconnection.** Which of 80 named white-matter tracts
-does it sever, and which network-level connections does it cut?
-
-If the thesis is right, B beats A. That is the whole project's go/no-go, and
-I deliberately put it first — before building any polished infrastructure —
-because if it fails, no amount of good engineering saves the idea."
+I'm going to show you the pipeline, the result, and the checks. The short version
+is that the answer is no — and the interesting part is how confident I am about
+that."
 
 ---
 
-## 2 — It is end-to-end and it is real (2 minutes)
+## Slide 2 — The question (1 minute 30)
 
-> Slide: the pipeline diagram. Mask → registration → disconnection → report →
-> prediction. Or just show the four output figures.
+"A stroke kills a region of brain tissue. The standard way to describe it is
+*where* — which region died.
 
-"This is not a notebook. A lesion mask goes in one end and a readable report
-comes out the other, with a 415×415 disconnection matrix, an 80-tract severance
-profile, four figures, and a predicted WAB score.
+But a brain region is only useful because of what it's wired to. A lesion doesn't
+just destroy the region, it also cuts the white-matter cables running underneath
+it. So there's a competing idea: what matters isn't where the damage is, it's
+which connections it severs.
 
-Two datasets feed it. 108 real, de-identified lesions that arrive already in
-MNI space. And the 228 ARC subjects — whose masks are drawn in **native scanner
-space**, on five different per-subject grids, none of them MNI-aligned. I
-verified that from the file headers, not the filenames.
+That's a real, testable claim, and both sides of it can be measured from the same
+lesion mask. Model A describes location — 463 anatomical regions, how much of each
+one is damaged. Model B describes disconnection — which of 80 white-matter bundles
+were cut, and which network-to-network connections were disrupted.
 
-So ARC needed registration, and that is the part worth pausing on."
+Then you train both on the same patients and compare."
 
-### Registration — the detail that shows the work
+> Point at the three outcomes on the right.
 
-"T2-weighted scan to the FSL MNI152 template, using ANTs. Two things mattered.
-
-First, this is **cross-modality** — a T2 scan against a T1 template — so both
-stages use mutual information, not correlation.
-
-Second, and this is the one people get wrong: **cost-function masking on every
-stage.** ANTsPy's default masks only the nonlinear stage, which leaves the
-affine free to pull healthy tissue into the hole where the lesion is. The
-lesion would distort its own warp. I forced it on for all stages.
-
-Result: median whole-brain Dice **0.924**, worst subject 0.901.
-
-And here is why I ran a pilot of 8 and *looked at the images* before the batch.
-Every lesion shrank by about **30%** entering MNI space. That looks like a bug.
-It is not. I pulled the affine determinant out of the transform: 1.514, which
-implies a moving-to-fixed volume scale of 0.660. The measured lesion ratio was
-0.704. The lesion is scaling by essentially the same factor as the whole brain.
-The compression is uniform and correct — and I only know that because I
-measured it against the transform that produced it instead of assuming."
+"I decided in advance what each result would mean, before running anything. That
+matters, because if you decide afterwards, you'll find a way to like whichever
+answer you get."
 
 ---
 
-## 3 — The answer (3 minutes) ★ the core of the talk
+## Slide 3 — Current status (1 minute 30)
 
-> Slide: the results table. Leave it up for a while.
+"Before the result, briefly — this is a working system, not a notebook.
 
-"Here is the comparison. Nested cross-validation, 25 outer folds, every arm
-scored on the **identical** folds with a fixed seed, so this is a paired
-comparison — not seven separate experiments.
+A lesion mask goes in and a full report comes out: which anatomy is damaged, which
+tracts are severed, two independent disconnection matrices, four figures, and a
+predicted language score — or a refusal, if the lesion is outside what the model
+was trained on.
 
-| arm | R² | 95% interval across folds |
-|---|---|---|
-| network edges (counted matrix) | **0.481** | [0.222, 0.659] |
-| network edges (inferred matrix) | 0.465 | [0.240, 0.593] |
-| **location — Model A** | 0.444 | [0.299, 0.625] |
-| **tract severance — Model B** | 0.421 | [0.266, 0.606] |
-| **lesion volume alone** | **0.398** | [0.200, 0.623] |
+It's been run over 108 real lesions with no QC exclusions, and the labelled cohort
+is 228 patients who have both a lesion mask and a language score.
 
-Read that table on its own and disconnection wins. My code originally said
-exactly that. **It was wrong**, and I want to walk through why, because it is
-the most important thing I learned."
+Two numbers to notice. The registration quality is 0.924 — that's a standard
+overlap measure, and it's ordinary published quality. And there are 203 automated
+tests, because most of what went wrong in this project was invisible without them."
 
-> Beat. Point at the interval column.
+> If the room is technical, add:
 
-"Look at the intervals. Every single arm spans roughly 0.2 to 0.65. Ranking
-the medians of distributions that overlap that much will confidently call a
-coin flip a finding.
-
-So I ran the paired test the folds entitle me to — Wilcoxon signed-rank,
-Bonferroni corrected."
-
-> Slide: the paired table.
-
-| comparison | median diff | folds better | p | corrected |
-|---|---|---|---|---|
-| network edges vs volume | +0.055 | 16/25 | 0.032 | 0.22 |
-| location vs volume | +0.026 | 16/25 | 0.134 | 0.94 |
-| tracts vs volume | +0.012 | 14/25 | 0.252 | 1.00 |
-| network edges vs location | +0.011 | 14/25 | 0.325 | 1.00 |
-| **network edges (inferred) vs location** | **−0.022** | 11/25 | 0.634 | 1.00 |
-
-"**Nothing beats location. Nothing survives correction.** The single nominally
-significant result is against *lesion volume*, not against the baseline the
-thesis is actually about — and it dies at p = 0.22 corrected.
-
-The answer is **B ≈ A**. Disconnection is not distinguishable from location.
-
-I then changed the harness so it runs this test itself and prints it last, so
-it can never again report an ordering of overlapping medians as a result."
-
-> That last sentence is the most credible thing in the talk. Say it slowly.
+"Everything lives on one coordinate grid, and the code refuses to combine two
+images unless it has verified they're on the same grid. That check exists because
+early on I found two atlases that had identical dimensions and identical voxel
+sizes but stored the x-axis in opposite directions. Merging them mirrored every
+structure — a left-hemisphere lesion came back labelled right hemisphere. Nothing
+about the shape or the file size would tell you."
 
 ---
 
-## 4 — The number that should worry you most (2 minutes)
+## Slide 4 — Example output (1 minute)
 
-> Slide: just the one number, large. `0.398`
+"This is what one patient produces. Glass brain, the lesion on a template, the
+severed tracts ranked, and the disconnection matrix.
 
-"**Lesion volume alone — one single column, how big is the hole — reaches
-R² 0.398.** Every other arm in that table is fighting over the remaining 0.05.
+Two things worth pointing out.
 
-I predicted this before the run. On the other cohort I measured how much of
-each feature set is *recoverable lesion size*: 47% for tract severance, **66%
-for the network edges**. Two-thirds of my best feature set is a proxy for how
-big the lesion is.
+Everyone is a number. The original files arrived with patient names in the
+filenames. The mapping from name to number is stored in one place that never
+leaves the machine, and there's an automated check that greps every single file
+this project writes, looking for patient identifiers. It has caught a real name
+three times — twice because I typed one into a code comment while explaining
+something.
 
-So beating location is not enough. The honest question is incremental —
-does `volume + disconnection` beat `volume` alone?
-
-The weak form of that test was inconclusive. The sharp form is to remove volume
-from the **target** and see if anything is left."
-
-> Slide: the residual table.
-
-"I fit a nuisance model on log lesion volume **inside each training split**,
-subtract its prediction from both sides, and score on the residual. Note
-*inside each split* — fitting it once over all 228 subjects, which is the
-obvious implementation, leaks the test outcomes into the residual and inflates
-every arm at once. So it is refit 25 times.
-
-| arm | R² on the volume-free residual |
-|---|---|
-| location | −0.005 |
-| tracts | −0.011 |
-| *volume — the control* | *−0.015* |
-| network edges | −0.026 |
-
-**Every arm is at or below zero. So is every one of the 18 model-by-feature-set
-cells.** Not one combination predicts the residual better than its own mean.
-
-Read the control row first: volume predicting its own residual comes back at
-−0.015, which is what a correctly removed confound looks like. If that row were
-appreciably above zero, the nuisance model had leaked and the whole table would
-be void.
-
-What this licenses: the 0.05 separating those arms is **not** topology
-information sitting on top of lesion size. When size comes out of the target,
-there is nothing left for any arm to find — *including the location baseline*.
-
-What it does **not** license: 'there is no signal.' R² ≤ 0 at n = 228 is a
-statement about **detectability**, not about existence.
-
-The honest summary is: on this cohort, at this n, **lesion volume is the model,
-and everything else is decoration.**"
+Second, the tract list shows both the percentage severed and the absolute volume.
+That's not decoration. If you rank purely by percentage, small tracts always win —
+across all 108 patients, not one of the six largest tracts was ever ranked first,
+even though the corpus callosum is involved in almost every large stroke."
 
 ---
 
-## 5 — A finding nobody asked for (2 minutes)
+## Slide 5 — Registration (1 minute 30)
 
-> Slide: the two matrices, and the two correlation numbers.
+"To compare patients you have to put them in a common space, and the labelled
+scans arrived in the scanner's own coordinates — five different grids, two
+different orientations, none aligned to a template.
 
-"One more result, and this one is independent of whether the thesis holds.
+The important decision is the second bullet. A lesion is a hole in the anatomy the
+alignment is trying to match. If you don't tell the algorithm to ignore it, it
+tries to fill the hole by pulling healthy tissue into it — and it distorts exactly
+the region you're trying to measure. So the lesion is excluded from the similarity
+calculation at every stage.
 
-I built the disconnection matrix **twice**, from two completely independent
-sources. Once by inferring which regions a tract connects from which regions it
-touches. And once by counting for real — taking a tractogram of **479,457
-streamlines**, assigning both ends of every fibre to a region, and counting how
-many of each connection's fibres pass through the lesion.
+The last bullet is the check that actually matters. This is an aphasia cohort, so
+essentially every lesion should be left-hemisphere. All 228 came back
+left-dominant. If the alignment had flipped anyone, they'd show up on the right,
+and I'd know."
 
-Two methods, same input, same output shape. Here is how much they agree, across
-all 108 lesions:
+> If asked why a picture and not just a number:
 
-| level | median Spearman ρ | subjects positive |
-|---|---|---|
-| individual region pairs (415 nodes) | **−0.318** | 4 / 108 |
-| network level (17 systems) | **+0.331** | 104 / 107 |
-
-**The sign flips.** At network level they agree. At the level of individual
-connections they *anti-correlate*.
-
-I tested and rejected three explanations before accepting the fourth —
-normalisation, fraction-versus-count, and a laterality bug. What survives is
-granularity: both methods name the same anatomy and then pick different
-*adjacent* parcels within it. On a test lesion, both say motor cortex to
-brainstem; one picks parcel 35, the other picks parcel 37.
-
-The consequence is a real constraint on anyone doing this work: **a single
-region-pair edge is not a reliable feature.** Coarsen to networks, or restrict
-to edges where two independent methods agree. That holds whether or not my
-thesis does."
+"I ran eight patients first and looked at them, before committing to the full
+batch. The overlap score can look fine while something is visibly wrong."
 
 ---
 
-## 6 — What the guardrails caught (2 minutes)
+## Slide 6 — Measurement reliability (2 minutes)
 
-> Slide: pick two of these. They land every time.
+> This slide surprises people. Slow down.
 
-"The reason I trust the negative result is that the same instrumentation caught
-a series of errors that would each have produced a confident, plausible, wrong
-answer.
+"I built the disconnection measure twice, using two completely independent
+sources. One infers connections from the shape and position of 80 known
+white-matter bundles. The other counts actual reconstructed nerve fibres — 479,000
+of them — and checks which ones pass through the lesion.
 
-**One. Two atlases, same space, opposite storage order.** Harvard-Oxford ships
-RAS-ordered; the Schaefer parcellation ships LAS. Identical world coordinates,
-identical 2mm voxels, x-axis stored in reverse. Merging the raw arrays — the
-obvious implementation — mirrors every subcortical structure. A **left**
-putamen lesion comes back labelled **right** putamen. No shape check, no voxel
-count, no volume check catches that. It is now asserted in code, and there is a
-test that shows the assertion failing on a deliberately mirrored atlas.
+They share no data, no reference dataset, and no algorithm. So comparing them
+tells you how much to trust either one.
 
-**Two. 'MNI space' is not one space.** The template nilearn hands you by
-default is 99×117×95. The one the atlases ship on is 91×109×91. Both are
-legitimately called MNI152. Intersect a lesion with a misaligned parcellation
-and you get a disconnection matrix that looks entirely plausible and is quietly
-wrong. Every function that combines two volumes now asserts they are on the
-same grid first.
+At the level of broad brain systems, they agree — correlation of positive 0.33,
+and they agree for 104 of 107 patients.
 
-**Three, and this is the uncomfortable one. The de-identification check.** The
-108 lesions arrived with patient names and apparent medical record numbers in
-the filenames. So there is a test that greps every artifact this project emits
-— source, docs, CSVs, JSON, image headers, compressed PNG text chunks — for
-every identifying token. It also scans this project's own source code. **It has
-caught a real patient name three times. Twice it was in a code comment written
-by the person who wrote the check.**
+At the level of individual region-to-region connections, they *anti*-correlate.
+Negative 0.32, and they agree for only 4 patients out of 108. The sign flips.
 
-**Four — reading the output, not the tests.** The anatomy section of my report
-once described a lesion that was 70% cerebellum using only the 18% of it that
-clipped occipital cortex — because the node set has no cerebellar labels, so it
-saw a minority of the lesion and presented it as a confident table. That would
-have passed every test written from the spec. It only failed when a human read
-one real report."
+I tested three explanations and ruled them all out before accepting this. What's
+left is resolution: the brain regions here average about the size of a sugar cube,
+and the two methods keep picking different *neighbouring* regions inside the same
+functional area. Both will say 'motor cortex to brainstem'; they disagree about
+which specific patch of motor cortex.
+
+The consequence is concrete: any claim about one specific connection being cut is
+not trustworthy. Only the network-level summary is. That constrained everything I
+did afterwards."
 
 ---
 
-## 7 — Live demo (3 minutes)
+## Slide 7 — Main result (2 minutes 30)
 
-> Two commands. Both verified working. Have them already typed.
+> This is the core of the talk.
 
-```bash
-cd scripts
-../.venv/Scripts/python.exe 05_report.py ../data/derived/arc/lesions/sub-M2001_lesion.nii.gz
-```
+"Here's the comparison. Disconnection is at the top, location is in the middle,
+lesion volume alone is at the bottom.
 
-"Real ARC subject. Mask in. Out comes anatomy, severed tracts, the matrix, four
-figures — and this."
+If you read only the bar lengths, disconnection wins and I have a paper.
 
-```
-features                      predicted     90% interval   CV R2    MAE
-volume                             41.1          [6, 72]   0.424   17.2
-location                           65.3         [32, 97]   0.454   16.3
-network_edges_streamline           60.1         [31, 93]   0.519   15.0
-```
+Now look at the error bars. Those are 95% confidence intervals, and they span
+about 0.4 — for every single model. They overlap almost completely.
 
-> Now say the honest part before anyone else spots it.
+Every model here was scored on exactly the same 25 cross-validation splits, so I
+can compare them patient-by-patient rather than just comparing averages. When you
+run the proper paired statistical test and correct for the number of comparisons,
+nothing beats the location baseline. Nothing.
 
-"Three things about this, in order of how much they matter.
+The only difference that's even nominally significant is against lesion volume,
+not against the baseline the whole thesis is about — and it doesn't survive
+correction either.
 
-**All three arms are always printed.** Never just the disconnection number. If
-I printed that alone I would be presenting a coin flip as a capability. The
-report says so in its own text.
+So the honest answer is: disconnection is not distinguishable from location on
+this data."
 
-**The three arms disagree by 24 points** on this one lesion, on a 0–100 scale.
-That is section four made visceral.
+> If someone says "but the ordering is consistent":
 
-**And this subject's true score is 87.1** — and this subject is *in the
-training set*, because the final model is fit on all 228. So all three arms
-miss an in-sample subject by 22 to 46 points. That is not a failed demo. That
-is exactly what 'n = 228 is the binding constraint' looks like when you stop
-reading tables and look at one patient."
-
-```bash
-../.venv/Scripts/python.exe 05_report.py sub-0035
-```
-
-```
-NO PREDICTION -- this lesion is outside the training distribution:
-  - only 0% of this lesion is in the LEFT hemisphere. The model was trained
-    on ARC, which is 228/228 left-dominant aphasia. WAB-AQ is a language
-    score and this lesion is not in the territory it was learned from.
-
-A number is deliberately not shown. The model would return one, and it
-would be meaningless.
-```
-
-> This is the closing beat of the demo. Let it sit.
-
-"This lesion is entirely in the right hemisphere. The training cohort is
-228 out of 228 left-hemisphere aphasia patients, and WAB is a language score.
-The model *would* happily return a number. It would be meaningless. So the
-applicability check is **enforced, not warned about** — and 67 of my own 108
-lesions get refused by it."
-
-### Optional: the viewer hand-off
-
-> Only if it is already running. Rehearse it, or cut it.
-
-"The disconnection output also exports into an existing neuroimaging viewer —
-writing the exact directory layout that viewer's own upload endpoint produces,
-so pointing it at this bundle loads the lesions with **zero changes to its
-code**. Two projects, one shared space contract, no coupling.
-
-Caveat I will state rather than hide: only the file-drop path is proven. The
-programmatic upload client has been tested against a stub of the documented
-contract, never against a live backend. Until it is, it should be considered
-unproven."
+"It is, and that's exactly the trap. My own code originally reported that ordering
+as the finding. I replaced it with the paired test, and the paired test says it's
+a coin flip. Ranking the averages of distributions that overlap this much will
+call noise a result every time."
 
 ---
 
-## 8 — Close (1 minute)
+## Slide 8 — Lesion volume (2 minutes)
 
-"So. The thesis did not hold. Disconnection is not distinguishable from
-location on this cohort, and once lesion volume is removed properly, neither of
-them is distinguishable from noise.
+> The uncomfortable slide. Do not rush it.
 
-What exists anyway is a pipeline that takes a raw native-space scan to a
-registered, quality-controlled, de-identified disconnection profile and a
-report a human can read — plus a measured constraint on how finely anyone
-should trust these matrices, plus a harness that tests itself against pure
-noise and refuses to answer questions outside what it was trained on.
+"This is the number that should bother you most, and it's why I trust the negative
+result.
 
-The most useful thing I can say is this: the version of this project that
-reports 'disconnection beats location, R² 0.48' exists. It is one Wilcoxon test
-away from the version I am showing you. **The difference between them is not
-data. It is whether you run the test that can embarrass you.**"
+Lesion volume is one number. How many cubic millimetres of tissue are dead. You
+get it by counting voxels in the mask — no atlas, no alignment to a template, no
+tractography, nothing.
+
+That one number explains about 40% of the differences in language outcome between
+patients.
+
+Everything else in this project — 463 anatomical regions, 80 tracts, two
+disconnection matrices, 479,000 fibres — takes you from 40% to 48%.
+
+In clinical terms: the best model is accurate to about 15 points on a 100-point
+scale. Volume alone gets you 18. Patients differ from each other by 28 points on
+average. So the whole sophisticated half of the pipeline is competing for the last
+eighth of the result.
+
+And it gets worse, because lesion volume can be reconstructed *from* the
+disconnection features — up to 66% of it. Which means most of what those features
+carry isn't connectivity. It's size, measured a more complicated way."
+
+> The bottom-right card is worth one sentence:
+
+"That 1.000 is a deliberate sanity check — a model given lesion volume, asked to
+predict lesion volume, must score exactly 1. If it didn't, the evaluation code
+would be broken and every other number on this slide would be meaningless."
+
+---
+
+## Slide 9 — Controlling for lesion volume (2 minutes)
+
+"So I asked the sharper question directly. Take lesion volume out of the outcome
+first, and then see whether anything predicts what's left.
+
+The method matters. A model of lesion volume is fitted *inside each training
+split* and subtracted, then the features are scored on the residual. If you fit
+that model once across all patients — which is the obvious way to do it — you leak
+information from the held-out patients into the thing you're predicting, and every
+result inflates at once.
+
+The answer is on the left. Every feature set lands at or below zero. Not just
+disconnection — the location baseline too. And that holds for all 18 combinations
+of feature set and model, not just the best one.
+
+The red bar is the control. Lesion volume predicting its own residual scores
+minus 0.015 — essentially zero, which is what correctly removed means. If that bar
+were meaningfully above zero, it would mean the method leaked and the whole slide
+would be void.
+
+So the 0.05 on the previous slide isn't connectivity information sitting on top of
+size. When size leaves, there's nothing underneath it."
+
+> Be careful here if pressed:
+
+"This doesn't prove there is no signal. It proves that at 228 patients, with these
+methods, nothing predicts the volume-free residual. That's a statement about what
+this study can detect."
+
+---
+
+## Slide 10 — Demographic covariates (1 minute)
+
+"The obvious objection is that I've left out things that obviously matter — age,
+sex, and how long ago the stroke was. They were sitting in the data file for all
+228 patients, so this cost nothing to check.
+
+They add nothing. On their own they score below zero. Added to lesion volume, they
+make it slightly *worse*.
+
+Time since stroke is the interesting one, because it should matter — people
+recover. Its correlation with outcome, after accounting for lesion volume, is
+minus 0.002. Effectively zero. The reason is at the bottom: this is a chronic
+cohort, a median of about two years post-stroke. Recovery had already levelled off
+before anyone was assessed. In a cohort measured in the first few weeks, it would
+almost certainly matter.
+
+And the footnote is a nice illustration of the whole problem. There *is* a
+significant sex difference in outcome — until you account for lesion volume, at
+which point it disappears. Women in this cohort happen to have smaller strokes.
+Report it without the control and you've published a demographic finding that is
+actually a lesion-size finding."
+
+---
+
+## Slide 11 — Cohort size (1 minute)
+
+> This is a correction to my own work. Own it plainly; it lands well.
+
+"My project plan said there were 902 sessions available and I was only using 228,
+so getting more patients was the cheap way to improve the result.
+
+That was wrong. 902 counts scanning sessions, not people. There are 245
+participants. 228 have a lesion mask. The other 17 have a language score but no
+mask, so they can't be used at all.
+
+228 isn't a sample I chose. It's everyone. There is no more of this dataset to
+get, and the larger stroke dataset that does exist doesn't release outcome scores.
+
+It took one command to count the files. It should have been checked before it was
+written into the plan."
+
+---
+
+## Slide 12 — Multiple-comparison correction (1 minute 30)
+
+> Optional if you are short on time. Keep it if the audience is statistical.
+
+"One more finding, which is about method rather than biology.
+
+When you run many comparisons you have to correct the p-values for how many you
+ran. What I found is that the corrected values depend on how many models happened
+to be in the same command.
+
+Same data, same measurement, same underlying test statistics — identical to four
+decimal places. But run five extra combined models alongside, and the comparison
+count goes from 7 to 15, and the headline p-value moves from 0.22 to 0.48.
+
+I'm reporting this rather than fixing it, deliberately. The obvious fix is to
+declare fewer comparisons — and that moves p-values in the direction that makes
+results look better. That's exactly the wrong instinct. Nothing is significant at
+either count, so it changes no conclusion here, but it's worth knowing that the
+number is that sensitive to how you ran it."
+
+---
+
+## Slide 13 — In progress (1 minute)
+
+> Be straight about this. Do not imply it is finished.
+
+"One thing is genuinely incomplete, and I'd rather say so than have it found.
+
+There's a validation test that shuffles the outcome labels randomly and checks the
+model can't predict noise. The existing version uses a linear model, which is
+unstable on these features — so it validates the linear results, not the
+tree-based models that produce every number I've shown you.
+
+I've rewritten it to run on the correct models and made it about three times
+faster. The control model passes cleanly: it scores 0.42 on real data against
+minus 0.10 on shuffled data, with the lowest p-value the test can produce.
+
+But only one of six models has finished. So the accurate statement is:
+implemented, validated on the control, currently incomplete. Roughly 80 minutes
+of computing left, and it resumes where it stopped."
+
+---
+
+## Slide 14 — Next steps (1 minute)
+
+"In priority order.
+
+Finish that validation test. Then hold out a genuine test set — right now every
+number I've shown is cross-validated on the same 228 patients, which is standard
+but not the same as a clean test set. Then compare alternative registration
+methods, because I accepted the current one on a good score without checking
+whether something else is better.
+
+The two items at the bottom came *off* the list. Getting more patients turned out
+to be impossible, and the demographic covariates turned out to be nothing. Both
+were removed by measuring, not by deciding."
+
+---
+
+## Slide 15 — Summary (1 minute)
+
+"Where this leaves things.
+
+On this cohort, at this sample size, lesion volume accounts for the predictive
+performance. Neither disconnection nor location adds anything measurable beyond
+it.
+
+That's a negative result, and I want to be clear that I don't think it's a failed
+project. The pipeline works, it's checked, and it produced a clear answer in the
+direction I wasn't hoping for — after the point estimates initially suggested the
+opposite. Catching that is the part I'd defend.
+
+What would change the conclusion is a bigger labelled cohort, or a way of
+representing disconnection that isn't mostly a proxy for lesion size. What would
+*not* change it is a more complicated model on 228 patients with error bars this
+wide."
 
 ---
 
 ## Anticipated questions
 
-**"Why not just use more subjects?"**
-228 is the *entire* labelled cohort, not a sample of it. I want to be careful
-here because I got this wrong once myself and wrote the correction into the
-docs: the dataset advertises 902, but that is scanning **sessions**, not
-people. The participant table has 245 rows, 228 have a lesion mask, and the
-remaining 17 have a WAB score and no mask at all — so they cannot enter a
-lesion-symptom model on any terms. More subjects means a *different* cohort.
-And the large dataset — 1,453 scans — is the one that withholds outcome scores
-for privacy. That is the bind the whole field is in.
+**"Isn't a negative result just a failed project?"**
+No. The claim being tested is popular and plausible, and it's expensive to chase.
+A properly checked negative saves other people from spending a year on it. The
+value here is in the checking, not the outcome.
 
-**"Did you control for age, sex, time since stroke?"**
-Yes, and they are complete for 228 of 228, so it cost no new data. Alone they
-score R² **−0.014** — indistinguishable from noise. Added to lesion volume they
-make it *worse*, 0.387 against 0.398. Time post-stroke has a partial
-correlation of **−0.002** given volume: not weak, absent. This is a *chronic*
-cohort at a median 721 days, so recovery has plateaued; that variable would
-matter in a cohort scanned in the first weeks and this is not one. And the
-apparent sex effect — nominally significant at p = 0.008 — dies under the
-volume control, because women in this cohort have smaller lesions. Reporting
-that univariate p would have been a lesion-size finding dressed up as a
-demographic one.
+**"Why not use deep learning / a transformer?"**
+228 patients, and between 80 and 463 features. A neural network would memorise 228
+rows perfectly and generalise to nothing. More importantly, one single feature
+already explains 40% and nothing else adds anything that survives — there's no
+hidden structure for a bigger model to find. A graph neural network was in the
+plan, gated on this test passing. It didn't pass.
 
-**"How do I know your cross-validation harness isn't manufacturing signal?"**
-Two controls, both tests. **Positive:** the volume arm predicting log volume
-returns R² = 1.0000 exactly, so the machinery is wired correctly end to end.
-**Negative:** pure noise must score R² ≤ 0 and must not reach a small
-permutation p. A harness that invents signal would have produced a thesis
-result out of nothing, so it is tested against itself.
+**"Maybe your disconnection measure is just bad?"**
+Possible, and slide 6 is me testing exactly that. I built it twice from
+independent sources. They agree at network level, which is the level I used. If
+both are wrong they're wrong in the same direction, which I can't rule out — but
+they aren't obviously broken.
 
-**"What about a permutation null?"**
-Honest answer: it validated the *linear* arms and not the tree arms that
-produce the headline numbers, and that was a real gap. The reason is that ridge
-is unusable on these features — its fold interval reaches **−63.5**, because the
-column standard deviations across the 136 network edges span a factor of
-**7×10⁵**, so a near-constant column explodes when a test subject is nonzero.
-I am closing it on the tree models now: volume over 200 permutations gives an
-observed 0.416 against a null median of −0.10, **p = 0.005**. The remaining
-arms are compute time, not a design gap.
+**"Isn't R² of 0.48 quite good for this field?"**
+It's respectable, and that's the trap. 0.40 of it is available from lesion volume
+alone. The question isn't whether the model predicts — it's whether disconnection
+adds anything, and slide 9 says it doesn't.
 
-**"Do you have a held-out test set?"**
-No, and it is the one gap I have not closed. Every number here is
-cross-validated on the same 228 subjects. It is undone because n = 228 makes it
-expensive rather than merely tedious — holding out 20% costs the comparison
-statistical power it already does not have. I would rather say that plainly
-than hold out 45 subjects and report a single noisy number as validation.
+**"What if the outcome measure is too coarse?"**
+Fair. It's a single aggregate language score. A per-domain breakdown — naming,
+comprehension, repetition — might localise better, and disconnection might matter
+for one of them. That's a legitimate next study, and it needs the per-domain
+scores, which I'd have to go and get.
 
-**"Isn't a normative connectome a big assumption?"**
-The biggest one in the project, and it is stated in the report header, its
-footer, the JSON output, and the caption of every figure. Disconnection is
-inferred by intersecting a lesion with a tractography atlas built from
-**healthy** brains. No diffusion imaging of the patient is used. It describes
-average wiring, not this individual's — not their pre-existing anomalies and
-not their post-stroke reorganisation. Every number is a lower bound: a small
-lesion at a bundle's narrow waist can disconnect it almost entirely while
-scoring low.
+**"How do you know the pipeline itself isn't broken?"**
+Three ways. A positive control that must return exactly 1.000 and does. A test
+that feeds the system pure noise and requires it to score zero or below. And 203
+automated tests, including ones that deliberately corrupt an atlas and check the
+safety checks fail.
 
-**"So was this a failure?"**
-The thesis lost. The project answered its own question, which is what it was
-built to do, and it produced two things that outlive the answer: a measured
-constraint on the resolution at which these matrices can be trusted, and a
-demonstration that lesion volume is a far stronger baseline than this
-literature usually admits. The failure mode I avoided was shipping the version
-with the 0.48 in the headline.
+**"Could you predict for a new patient today?"**
+Yes, for a left-hemisphere stroke. The model is trained, saved, and wired into the
+report. For anything else it refuses rather than returning a number — two-thirds
+of my own 108-lesion set are right-hemisphere, and a language model has nothing
+meaningful to say about those. It's a research tool, not a diagnostic.
 
 ---
 
 ## Pre-flight checklist
 
-- [ ] `git status` is clean, or do not show the repo — there is uncommitted work.
-- [ ] Both demo commands run once beforehand, so figures are cached and fast.
-- [ ] Know that `sub-M2001` true WAB-AQ is **87.1** and that it is in-sample.
-- [ ] If showing the viewer hand-off: the export bundle is written and the
-      viewer is already running. Otherwise cut it and show the four figures.
-- [ ] Have the four output PNGs open in a folder as a fallback if anything
-      fails live.
+- Open the deck **before** the room fills; PowerPoint holds a file lock and a
+  rebuild will fail while it's open.
+- Know these six numbers cold: **0.398** (volume alone), **0.481** (best model),
+  **228** (the whole cohort), **0.924** (registration quality), **−0.318 / +0.331**
+  (the two-matrix disagreement), **1 of 6** (validation test progress).
+- Slides 7, 8 and 9 are the argument. If you're cut to five minutes, show those
+  three and slide 15.
+- If asked something you don't know, say so and offer to check. This talk's whole
+  credibility rests on not overclaiming.

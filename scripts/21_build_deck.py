@@ -513,7 +513,7 @@ tb(s, Inches(.7), Inches(6.55), Inches(11.9), Inches(.6),
 # ---------------------------------------------------------------- 14 next
 s = new("Next steps", "In priority order")
 bullets(s, Inches(.7), Inches(2.0), Inches(11.9), [
-    "1. Complete the permutation test |  approximately 50 minutes of computation. Closes the last of the four documented gaps.",
+    "1. Complete the permutation test |  roughly 80 minutes of computation. Closes the last of the four documented gaps.",
     "2. Hold out a test set |  the remaining open item. All current figures are cross-validated on the same 228 subjects.",
     "3. Compare alternative registration methods |  the current method was accepted on a Dice of 0.924, which does not establish that it is the best option.",
     "4. Test lesion-filling during registration |  a stronger alternative to the current approach.",
