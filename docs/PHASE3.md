@@ -11,6 +11,14 @@ mask and a WAB Aphasia Quotient, registered to MNI by `src/lesionconn/registrati
 roadmap's middle branch — *dig into representation before declaring anything* — and it is
 neither the win nor the failure.
 
+**This replicates.** Two larger studies using the same method class — a lesion mask embedded
+in a normative connectome — report the same ordering: Salvalaggio 2020 (n=132) finds
+structural disconnection predicts "to a level comparable to lesion information", and
+Khalilian 2025 (n=340) finds lesion masks outright superior to unthresholded disconnection
+maps. The absolute R² values here are in the normal published range too. See
+[LITERATURE.md](LITERATURE.md), which also records the contradicting results and what
+separates them.
+
 The point estimates say otherwise, which is the interesting part.
 
 | arm | best R² | 95% interval across folds | features |

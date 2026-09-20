@@ -323,6 +323,15 @@ Exit: raw T1 in → disconnection matrix out, no manual normalization step.
 
 Goal: go past the baseline into something novel and publishable.
 
+- [ ] **Threshold the disconnection maps before using them as features.** The one concrete
+      instruction the literature gives (docs/LITERATURE.md): Khalilian 2025 (n=340) found
+      unthresholded disconnection maps lose to plain lesion masks, while *thresholded* ones —
+      keeping only disconnections present in enough healthy subjects — were the best
+      performers in that study. This project has never thresholded, and
+      docs/DISCONNECTION.md reached the same conclusion independently from the ρ = −0.318
+      parcel-level disagreement between its two matrices. Cheap: both matrices are cached,
+      the counted one already carries per-edge fibre counts, and `19_train.py` takes
+      arbitrary feature sets. It remains a better feature object, not a fix for n = 228.
 - [ ] GNN over the disconnection graph; justify it by beating the flattened-vector baseline.
 - [ ] Try connectome-normalization variants — which one predicts best is an open question.
 - [ ] Low-rank / harmonic embeddings of the matrix as features.
