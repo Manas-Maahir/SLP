@@ -545,10 +545,11 @@ tb(s, Inches(.7), Inches(_pbottom + .1), Inches(11.9), Inches(.55),
 # ---------------------------------------------------------------- 14 next
 s = new("Next steps", "In priority order")
 bullets(s, Inches(.7), Inches(2.0), Inches(11.9), [
-    "1. Hold out a test set |  the one remaining gap in the analysis. All current figures are cross-validated on the same 228 subjects, and 228 is too few to spend on a holdout without losing the comparison entirely.",
-    "2. Compare alternative registration methods |  the current method was accepted on a Dice of 0.924, which does not establish that it is the best option.",
-    "3. Test lesion-filling during registration |  a stronger alternative to the current approach.",
-    "4. Display disconnection results in the viewer |  the export path has not yet been tested against a running instance.",
+    "1. Threshold the disconnection maps |  keep only connections present in enough healthy brains. An independent study of 340 patients found unthresholded maps lose to plain lesion masks while thresholded ones win, and our own two measures disagree in a way that says the same thing.",
+    "2. Hold out a test set |  the one remaining gap in the analysis. All current figures are cross-validated on the same 228 subjects, and 228 is too few to spend on a holdout without losing the comparison entirely.",
+    "3. Compare alternative registration methods |  the current method was accepted on a Dice of 0.924, which does not establish that it is the best option.",
+    "4. Test lesion-filling during registration |  a stronger alternative to the current approach.",
+    "5. Display disconnection results in the viewer |  the export path has not yet been tested against a running instance.",
 ], size=15, gap=15)
 rule(s, Inches(.7), Inches(5.8), Inches(11.9))
 tb(s, Inches(.7), Inches(6.0), Inches(11.9), Inches(1.0),

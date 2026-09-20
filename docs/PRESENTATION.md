@@ -355,7 +355,15 @@ measuring lesion size."
 
 "In priority order.
 
-Hold out a genuine test set. Right now every number I've shown is cross-validated
+First, threshold the disconnection maps — keep only the connections that show up
+in enough healthy brains, and throw away the rest. I have two independent ways
+of measuring disconnection and they disagree about individual connections, which
+says the fine-grained map is mostly noise. An independent study of 340 patients
+found the same thing from the other direction: unthresholded maps lose to plain
+lesion masks, thresholded ones win. It's cheap to try. It is not a fix for
+having 228 patients.
+
+Then hold out a genuine test set. Right now every number I've shown is cross-validated
 on the same 228 patients, which is standard practice but is not the same as a
 clean test set. I want to be honest that this one is hard rather than just undone
 — 228 is few enough that setting a fifth of them aside would leave the comparison
