@@ -353,3 +353,98 @@ def test_parallel_permutation_null_is_identical_to_the_serial_one():
     np.testing.assert_array_equal(null_serial, null_par)
     assert o_serial == o_par
     assert p_serial == p_par
+
+
+# --- thresholded arms (docs/THRESHOLDING.md) --------------------------------
+
+
+def _symmetric(rng, n, zero_frac=0.5):
+    m = rng.random((n, n)).astype(np.float32)
+    m[rng.random((n, n)) < zero_frac] = 0
+    m = np.triu(m, 1)
+    return m + m.T
+
+
+def _support(rng, n):
+    s = rng.integers(0, 120, size=(n, n)).astype(np.int32)
+    s = np.triu(s, 1)
+    return s + s.T
+
+
+def test_threshold_matrix_zeroes_exactly_the_rejected_edges_and_copies():
+    rng = np.random.default_rng(10)
+    m = _symmetric(rng, 30)
+    before = m.copy()
+    keep = _support(rng, 30) >= 50
+    out = md.threshold_matrix(m, keep=keep, min_value=0.3)
+    np.testing.assert_array_equal(m, before)  # input untouched
+    expected = np.where(keep & (m >= 0.3), m, 0)
+    np.testing.assert_array_equal(out, expected)
+    assert out.dtype == m.dtype
+
+
+def test_permissive_thresholds_reproduce_todays_features_bit_for_bit():
+    """sup0 / tau0 must BE the unthresholded arm -- the published arms cannot move."""
+    n = config.EXPECTED_N_PARCELS
+    rng = np.random.default_rng(11)
+    m = _symmetric(rng, n, zero_frac=0.9)
+    support = _support(rng, n)
+    today = md._upper(md.collapse_to_networks(m))
+    for op in ("sup0", "tau0"):
+        np.testing.assert_array_equal(md.threshold_features(m, op, support), today)
+
+
+def test_higher_support_threshold_keeps_a_subset_of_edges():
+    rng = np.random.default_rng(12)
+    support = _support(rng, 40)
+    previous = None
+    for k in md.SUPPORT_SWEEP:
+        kept = md.edge_mask(f"sup{k}", support)
+        if previous is not None:
+            assert not (kept & ~previous).any(), f"sup{k} kept an edge a lower floor dropped"
+        previous = kept
+
+
+def test_random_and_complement_controls_have_the_right_edges():
+    rng = np.random.default_rng(13)
+    support = _support(rng, 40)
+    kept = md.edge_mask("sup10", support)
+    rand = md.edge_mask("sup10rand", support)
+    comp = md.edge_mask("sup10comp", support)
+    iu = np.triu_indices(40, 1)
+    assert rand[iu].sum() == kept[iu].sum(), "size-matched: same number of edges"
+    assert (support[rand] > 0).all(), "random edges come from the connected set"
+    assert not (comp & kept).any(), "the complement is disjoint from the kept set"
+    assert ((support[comp] > 0) & (support[comp] < 10)).all()
+    for mask in (kept, rand, comp):
+        np.testing.assert_array_equal(mask, mask.T)
+    np.testing.assert_array_equal(rand, md.edge_mask("sup10rand", support))  # seeded
+
+
+def test_prevalence_filter_drops_rare_columns_only():
+    X = np.zeros((10, 4))
+    X[:, 0] = 1.0          # present in 10/10
+    X[:1, 1] = 1.0         # present in 1/10
+    X[:3, 2] = 1.0         # present in 3/10
+    out = md.prevalence_filter(X, 0.2)
+    np.testing.assert_array_equal(out, X[:, [0, 2]])
+    np.testing.assert_array_equal(md.prevalence_filter(X, 0.0), X)
+
+
+def test_every_threshold_arm_is_registered_as_disconnection():
+    """An unregistered arm is silently dropped by verdict() -- the worst failure here."""
+    arms = [f for f in md.FEATURE_SETS if "@" in f]
+    assert "network_edges_streamline@sup10" in arms
+    assert "network_edges@tau0.02" in arms
+    assert "network_edges_streamline@sup10rand" in arms
+    assert not any(a.startswith("network_edges@sup") for a in arms), (
+        "the inferred matrix has no fibre counts -- a support arm on it would be fiction"
+    )
+    for a in arms:
+        assert md.FEATURE_SETS[a].kind == "disconnection"
+        assert not md.is_control_arm(a)
+
+
+def test_unregistered_threshold_arm_raises():
+    with pytest.raises(KeyError):
+        md.build_features(["sub-0001"], "network_edges_streamline@sup7")

@@ -155,6 +155,143 @@ FEATURE_SETS: dict[str, FeatureSet] = {
 }
 
 
+# --------------------------------------------------------------------------
+# thresholded arms -- docs/THRESHOLDING.md
+# --------------------------------------------------------------------------
+#
+# An arm named `<base>@<op>` thresholds the parcel-level matrix and THEN
+# collapses to networks; the reverse order would have already averaged the
+# well-supported edges with the unsupported ones. `@`, never `+`: `+` is how
+# build_features and is_control_arm concatenate arms.
+#
+#   sup<k>      counted matrix only: keep edges carried by >= k S35 fibres.
+#               y-blind and cohort-blind -- the mask comes from the tractogram.
+#   sup<k>rand  same number of edges, drawn at random from the connected set
+#               (control C1: is it selection, or just fewer columns?)
+#   sup<k>comp  only the edges sup<k> throws away (control C2)
+#   tau<v>      zero entries below an ABSOLUTE value v. Not relative to the
+#               subject's own max: that is lesion-size dependent and would make
+#               one threshold mean different things per subject.
+#   prev<m>     drop network columns nonzero in < m of the subjects passed.
+#               Uses X only, never y, computed once over the whole cohort --
+#               mildly transductive, and labelled so rather than hidden.
+#   max         no threshold; the max-collapse. THRESHOLDING.md §6 item 8: it
+#               conditions the counted features ~100x better than mean, so any
+#               claim that thresholding fixed the linear arms must beat this.
+#
+# The inferred matrix has no fibre counts, so it gets no sup arms at all.
+
+SUPPORT_SWEEP = (0, 2, 5, 10, 20, 50, 100)
+TAU_SWEEP = (0.0, 0.01, 0.02, 0.05, 0.10)
+PREV_SWEEP = (0.0, 0.02, 0.05, 0.10, 0.25, 0.50)
+
+_MATRIX_BASES = {
+    "network_edges": ("matrix_path", "inferred"),
+    "network_edges_streamline": ("streamline_matrix_path", "counted"),
+}
+
+
+def _register_threshold_arms() -> None:
+    for base, (_, label) in _MATRIX_BASES.items():
+        for v in TAU_SWEEP:
+            FEATURE_SETS[f"{base}@tau{v:g}"] = FeatureSet(
+                f"{base}@tau{v:g}", f"136 network edges, {label}, entries < {v:g} zeroed",
+                "disconnection",
+            )
+        for m in PREV_SWEEP:
+            FEATURE_SETS[f"{base}@prev{m:g}"] = FeatureSet(
+                f"{base}@prev{m:g}",
+                f"network edges, {label}, columns nonzero in < {m:.0%} of the cohort dropped",
+                "disconnection",
+            )
+        FEATURE_SETS[f"{base}@max"] = FeatureSet(
+            f"{base}@max", f"136 network edges, {label}, max-collapse", "disconnection"
+        )
+    base = "network_edges_streamline"
+    for k in SUPPORT_SWEEP:
+        FEATURE_SETS[f"{base}@sup{k}"] = FeatureSet(
+            f"{base}@sup{k}", f"136 network edges, counted, edges with < {k} fibres zeroed",
+            "disconnection",
+        )
+        if k > 0:
+            FEATURE_SETS[f"{base}@sup{k}rand"] = FeatureSet(
+                f"{base}@sup{k}rand", f"control: as many random connected edges as sup{k}",
+                "disconnection",
+            )
+            FEATURE_SETS[f"{base}@sup{k}comp"] = FeatureSet(
+                f"{base}@sup{k}comp", f"control: only the edges sup{k} discards",
+                "disconnection",
+            )
+
+
+_register_threshold_arms()
+
+
+def threshold_matrix(
+    matrix: np.ndarray, *, keep: np.ndarray | None = None, min_value: float | None = None
+) -> np.ndarray:
+    """A copy with rejected edges zeroed. Never mutates, never touches the cache."""
+    ok = np.ones(matrix.shape, dtype=bool) if keep is None else np.asarray(keep, bool)
+    if min_value is not None:
+        ok = ok & (matrix >= min_value)
+    return np.where(ok, matrix, 0).astype(matrix.dtype)
+
+
+def edge_mask(op: str, support: np.ndarray) -> np.ndarray:
+    """Symmetric boolean mask of the parcel pairs a sup-family op keeps."""
+    import re
+
+    hit = re.fullmatch(r"sup(\d+)(rand|comp)?", op)
+    if not hit:
+        raise ValueError(f"{op!r} is not a support op")
+    k, variant = int(hit.group(1)), hit.group(2)
+    kept = support >= k
+    if variant is None:
+        return kept
+    if variant == "comp":
+        return (support > 0) & (support < k)
+    # rand: as many edges as sup<k> keeps, uniform over the connected set,
+    # seeded per k so a re-run draws the same edges.
+    iu = np.triu_indices(support.shape[0], 1)
+    connected = np.flatnonzero(support[iu] > 0)
+    n_keep = int(kept[iu].sum())
+    rng = np.random.default_rng(DEFAULT_SEED + k)
+    chosen = rng.choice(connected, size=n_keep, replace=False)
+    mask = np.zeros(support.shape, dtype=bool)
+    mask[iu[0][chosen], iu[1][chosen]] = True
+    return mask | mask.T
+
+
+def threshold_features(
+    matrix: np.ndarray, op: str, support: np.ndarray | None = None
+) -> np.ndarray:
+    """One subject's network feature vector under a threshold op (not prev)."""
+    if op == "max":
+        return _upper(collapse_to_networks(matrix, "max"))
+    if op.startswith("tau"):
+        return _upper(collapse_to_networks(threshold_matrix(matrix, min_value=float(op[3:]))))
+    if op.startswith("sup"):
+        if support is None:
+            raise ValueError("a support op needs the S35 edge-support matrix")
+        return _upper(collapse_to_networks(threshold_matrix(matrix, keep=edge_mask(op, support))))
+    raise ValueError(f"unknown threshold op {op!r}")
+
+
+def prevalence_filter(X: np.ndarray, min_fraction: float) -> np.ndarray:
+    """Drop columns nonzero in fewer than `min_fraction` of rows. X only, never y."""
+    if min_fraction <= 0:
+        return X
+    return X[:, (X != 0).mean(axis=0) >= min_fraction]
+
+
+def _edge_support() -> np.ndarray:
+    if "support" not in _GROUP_CACHE:
+        from .streamlines import edge_support_matrix
+
+        _GROUP_CACHE["support"] = edge_support_matrix()
+    return _GROUP_CACHE["support"]
+
+
 def encode_covariates(table) -> np.ndarray:
     """ARC's three covariates as a numeric matrix: age, sex indicator, log days.
 
@@ -235,6 +372,21 @@ def build_features(
                 "table is positionally aligned to subject_ids and must be the same length"
             )
         return X
+
+    if "@" in which:
+        base, op = which.split("@", 1)
+        path_key = _MATRIX_BASES[base][0]
+        load_op = "tau0" if op.startswith("prev") else op
+        support = _edge_support() if op.startswith("sup") else None
+        X = np.vstack(
+            [
+                threshold_features(
+                    np.load(cohort.subject_paths(str(sid))[path_key]), load_op, support
+                )
+                for sid in subject_ids
+            ]
+        )
+        return prevalence_filter(X, float(op[4:])) if op.startswith("prev") else X
 
     rows = []
     for sid in subject_ids:
@@ -488,6 +640,9 @@ def compare(
             scores = evaluate(X, y, fs, model, confounds=confounds, **kwargs)
             folds[(fs, model)] = scores.r2
             rows.append(scores.row())
+            # Thresholding zeroes whole columns across the cohort; n_features
+            # would still count them. THRESHOLDING.md §6 item 4.
+            rows[-1]["n_features_live"] = int((X.std(axis=0) > 0).sum())
             rows[-1]["fit_seconds"] = round(time.perf_counter() - started, 1)
             rows[-1]["residualised_on"] = residualised_on
             print(
