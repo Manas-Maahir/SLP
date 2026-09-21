@@ -372,6 +372,26 @@ conditions were met. The items below are **parked, not pending**:
 What would reopen this phase is a different cohort or a different modality, not a different
 representation: subject-specific diffusion (Del Gaizo 2017), or a larger labelled cohort.
 
+### For future consideration: predict aphasia *type*, not severity
+
+Not started. Recorded 2026-09-21 as the strongest remaining idea that needs no new data.
+WAB-AQ is a **severity** score, and severity is largely lesion size, which may be exactly
+why disconnection lost. The classic disconnection argument is about **which kind** of
+deficit a lesion causes (conduction aphasia from a severed arcuate fasciculus is the textbook
+case), and size should predict type far less well than it predicts severity.
+
+- ARC's manifest already carries `wab_type` for every subject. Whether ARC also ships WAB
+  sub-scores (fluency, comprehension, repetition, naming) is unchecked.
+- **First step, ~15 min:** count subjects per type and look for sub-score columns. Rare types
+  may be too small to learn from; the clinical fallback is fluent vs non-fluent.
+- Sub-scores are continuous, so the harness applies almost unchanged (~half a day). Type
+  alone is categorical and needs a classification harness: classifiers, balanced accuracy,
+  stratified folds, and a categorical form of volume removal (~a day).
+- Same discipline as THRESHOLDING.md: predictions and a stopping rule committed before any
+  fit, and the location baseline and size removal kept in every comparison.
+- If disconnection wins here, the headline becomes "disconnection matters for the kind of
+  deficit, not its severity". If it loses, the negative result is broader.
+
 Exit: a result that says something the off-the-shelf tools don't.
 
 ---
