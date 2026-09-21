@@ -118,6 +118,17 @@ It is worth saying that this would still be tested against the same n = 228 with
 intervals ~0.4 wide, so a real +0.03 would remain invisible. It is a better feature object,
 not a fix for the sample size.
 
+> **Tested, 2026-09-21. It does not replicate here, and that is not a contradiction.**
+> Khalilian's healthy-subject prevalence cannot be computed for either matrix in this project:
+> S35 is a single subject, and HCP-842 ships as volumes with no per-subject streamlines. So
+> the nearest analogues were swept instead: a fibre-support floor, an absolute value
+> threshold, and a cohort prevalence filter. The best, a ≥ 10-fibre floor, scores R² +0.5010
+> against +0.4806 unthresholded. It does not beat location after correction
+> (p_bonf = 0.12), and it scores −0.027 once volume is removed from the target. **A
+> size-matched set of random edges scores +0.5084**, so even the raw gain is fewer columns,
+> not better ones. Different object, different n: this says the analogue fails here, not that
+> Khalilian is wrong. [THRESHOLDING.md](THRESHOLDING.md) §9.
+
 ## What this review is not
 
 - **Not systematic.** Targeted searches against this project's specific claims, not a

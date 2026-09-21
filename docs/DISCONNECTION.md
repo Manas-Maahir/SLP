@@ -200,6 +200,14 @@ Measured across all 108 lesions, comparing the inferred (HCP-842) matrix against
 | **parcel level** (415 nodes) | **−0.318** | 4 / 108 |
 | **network level** (17 hemisphere × network groups) | **+0.331** | 104 / 107 |
 
+> **The mask behind −0.318, stated because it decides the sign.** The parcel-level figure is
+> computed over the **union** of the two matrices' nonzero edges, restricted to edges with
+> ≥ `MIN_EDGE_STREAMLINES` (10) S35 fibres. Recomputed that way it reproduces to four decimals
+> and to the same 4 / 108. Recomputed over all 85,905 edges it is **+0.032**; over the union
+> alone, −0.138. A reader who drops the mask gets roughly zero or the opposite sign. Nothing
+> about the finding changes, but it was always a support-thresholded number, and this
+> document did not say so. Measured in [THRESHOLDING.md](THRESHOLDING.md) §6 item 5.
+
 The sign flips. Two methods sharing no data, no reference and no algorithm **agree about which
 brain systems a lesion disconnects and contradict each other about which individual parcel
 inside them**.

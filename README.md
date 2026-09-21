@@ -13,7 +13,7 @@ modules) · [ROADMAP.md](ROADMAP.md) (phases, and what each one found) ·
 
 ## Status
 
-**End to end and working.** A lesion mask goes in; a disconnection profile and a readable
+**Complete** (2026-09-21). **End to end and working.** A lesion mask goes in; a disconnection profile and a readable
 report come out. Run over 108 real, de-identified lesions.
 
 | | |
@@ -24,6 +24,7 @@ report come out. Run over 108 real, de-identified lesions.
 | M5 report | `scripts/05_report.py` → text + 4 figures |
 | M1 registration | ARC T2w → MNI, cost-function masked, **Dice 0.924** — [docs/REGISTRATION.md](docs/REGISTRATION.md) |
 | M4 outcome model | trained on ARC (n=228), persisted, wired into the report — **but B ≈ A**, and volume-residualised it is B ≈ A ≈ 0. See [docs/PHASE3.md](docs/PHASE3.md) |
+| thresholding (Phase 5) | the one experiment the literature named, run against pre-committed predictions: **changes nothing**. Random edges score as well as selected ones. [docs/THRESHOLDING.md](docs/THRESHOLDING.md) |
 
 The thesis test runs on **ARC** (228 subjects with a lesion mask *and* a WAB Aphasia
 Quotient), not on the 108. Bug audit: [docs/BUGS.md](docs/BUGS.md).

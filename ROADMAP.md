@@ -1,5 +1,25 @@
 # ROADMAP.md
 
+> **Project status, 2026-09-21: complete.** The research question is answered (B ≈ A, and
+> volume-residualised, everything ≤ 0), and the one experiment the literature said to try,
+> thresholding, was run against pre-committed predictions and changes nothing. Phase 5 is
+> closed on a stated rule (see below). What remains is parked, each item with its reason:
+>
+> - **ATLAS R3.0**: blocked on a human step (the NITRC form and its encryption key). It has
+>   no outcome labels, so it could not change the answer.
+> - **Phase 4, raw-T1 intake and M2 segmentation**: the roadmap's own gate is "only worth it
+>   once Phase 3 holds", and Phase 3 does not hold.
+> - **NeuroVue live backend**: the upload path is verified against a stub only. Treat it as
+>   unproven until it runs against a live FastAPI + MongoDB instance.
+> - **`SyNRA` against other transforms**: Dice 0.924 was good enough to proceed, which is
+>   not evidence nothing is better. An untested assumption, not a task.
+> - **Narrowing the NIfTI de-identification scan** for future float32 artifacts
+>   (docs/BUGS.md B8): a guardrail decision. Ask first; never do it quietly.
+> - **A hold-out**: not spent, and the reasons are different for the A-vs-B comparison and for
+>   the shipped model. docs/PHASE3.md *What was NOT done*.
+> - **More subjects**: n = 228 is the entire labelled cohort. More subjects means a different
+>   cohort.
+
 > **Update, 2026-08-31.** Three of the four gaps `docs/PHASE3.md` listed are now closed, and
 > one of them was closed by discovering the question was wrong. **The covariates are nothing**
 > (R² −0.014 alone; they make `volume` worse). **Volume regressed out fold-safe takes every
@@ -319,23 +339,38 @@ Exit: raw T1 in → disconnection matrix out, no manual normalization step.
 
 ---
 
-## Phase 5 — Sharpen the model (the contribution)  ·  (open-ended)
+## Phase 5 — Sharpen the model  ·  **CLOSED** on a stated rule (2026-09-21)
 
 Goal: go past the baseline into something novel and publishable.
 
-- [ ] **Threshold the disconnection maps before using them as features.** The one concrete
-      instruction the literature gives (docs/LITERATURE.md): Khalilian 2025 (n=340) found
-      unthresholded disconnection maps lose to plain lesion masks, while *thresholded* ones —
-      keeping only disconnections present in enough healthy subjects — were the best
-      performers in that study. This project has never thresholded, and
-      docs/DISCONNECTION.md reached the same conclusion independently from the ρ = −0.318
-      parcel-level disagreement between its two matrices. Cheap: both matrices are cached,
-      the counted one already carries per-edge fibre counts, and `19_train.py` takes
-      arbitrary feature sets. It remains a better feature object, not a fix for n = 228.
-- [ ] GNN over the disconnection graph; justify it by beating the flattened-vector baseline.
-- [ ] Try connectome-normalization variants — which one predicts best is an open question.
-- [ ] Low-rank / harmonic embeddings of the matrix as features.
-- [ ] Ablations: which connections carry the predictive signal?
+- [x] **Threshold the disconnection maps before using them as features. Done, and it changes
+      nothing.** Design and four predictions committed before any fit
+      ([docs/THRESHOLDING.md](docs/THRESHOLDING.md)); four of five scored halves held. The
+      best threshold, a ≥ 10-fibre floor on the counted matrix, scores +0.5010 against
+      +0.4806 unthresholded. Against location it is +0.038, **p_bonf 0.12**; on the
+      volume-free residual it scores **−0.027**. The control that decides it: **a
+      size-matched set of random edges scores +0.5084**, so the raw gain is from fewer
+      columns, not from better ones. By-product: a 2% prevalence filter makes ridge usable
+      on the counted features (worst fold −63.5 → +0.265).
+
+**The stopping rule, committed in the plan before the run:** if the promoted thresholded arm
+does not beat location under the paired corrected test *and* stays ≤ 0 on the volume-free
+residual, Phase 5 closes, because representation is not the binding constraint; n is. Both
+conditions were met. The items below are **parked, not pending**:
+
+- ~~GNN over the disconnection graph~~: parked. Every representation tried so far (tracts,
+  two matrices, network collapse, three threshold families, max summary) scores ≤ 0 once
+  volume is removed. A more flexible model on 228 subjects cannot find signal that no simpler
+  representation carries, and it would overfit more easily.
+- ~~Connectome-normalisation variants~~: parked. Tested indirectly: the max summary conditions
+  the features about 100× better and predicts *worse* (+0.349).
+- ~~Low-rank / harmonic embeddings~~: parked, for the same reason as the GNN.
+- ~~Ablations: which connections carry the signal?~~: answered by the thresholding
+  controls. Random edges and discarded edges both predict about as well as the kept ones, so
+  no specific set of connections carries it. The signal is lesion size.
+
+What would reopen this phase is a different cohort or a different modality, not a different
+representation: subject-specific diffusion (Del Gaizo 2017), or a larger labelled cohort.
 
 Exit: a result that says something the off-the-shelf tools don't.
 

@@ -236,6 +236,35 @@ Phase 3 answer is still **B ≈ A**, and it is still the paired Wilcoxon over id
 that decides it. A permutation p of 0.005 on four different feature sets is exactly what you
 would expect from four feature sets that are all largely measuring lesion size.
 
+## Thresholding the maps: tested, and it changes nothing
+
+The one thing the literature said to try (LITERATURE.md, Khalilian 2025). The design and four
+predictions were committed before any fit; the full sweep, controls and scoring are in
+[THRESHOLDING.md](THRESHOLDING.md) §9. The threshold promoted by the pre-fixed rule was a
+**≥ 10-fibre support floor on the counted matrix**, and it was run alongside the published arms
+in their own 9-row family:
+
+| | `network_edges_streamline@sup10` |
+|---|---|
+| raw R², hist_gb | **+0.5010** [0.267, 0.657] (unthresholded: +0.4806) |
+| vs location, paired | +0.0384, 18/25, p = 0.0136, **p_bonf = 0.1224** |
+| volume-free residual | **−0.0268** |
+| permutation null | +0.5382 observed, p = 0.005 |
+
+**Nothing beats location after correction, and nothing survives removing volume.** The small raw
+gain is not selection: a size-matched set of **randomly chosen** edges scores +0.5084, higher
+than the support-selected one, and the edges the threshold throws away score +0.4622 on their
+own. Thresholding here reduces dimensionality; it does not find the connections that matter.
+
+The run also reproduced every published number in this document exactly (`location` +0.4436,
+`volume` +0.3984, residual control −0.0146), so adding the new arms moved nothing that was
+already here.
+
+A by-product worth keeping: dropping network columns that are nonzero in fewer than 2% of
+subjects (`@prev0.02`) takes ridge on the counted features from a worst fold of **−63.5** to
+**+0.265**, 25/25 folds positive. That is the conditioning pathology described above, fixed at
+its source. It is a fix for the linear model, not a new signal.
+
 ## What this means for Phase 5
 
 - **Coarser, not finer.** The 415×415 parcel edges were already known not to replicate between
@@ -273,6 +302,23 @@ would expect from four feature sets that are all largely measuring lesion size.
   this is now the *only* one of the four original gaps still open, because it is the one that
   n = 228 makes expensive rather than merely undone. Holding out 20% costs the comparison the
   power it already does not have.
+
+  **Two different claims have been conflated under "no hold-out", and they deserve different
+  answers.**
+
+  1. *The A-vs-B comparison.* A hold-out is the wrong tool. Twenty percent is ~46 subjects, and
+     the comparison is already underpowered using all 228 across 25 paired folds; a single 46-subject split would decide B vs A by the noise in one draw.
+     Nothing is lost by not having one here.
+  2. *The shipped M4 model.* This is the real gap. `predict.fit_final` does report out-of-fold
+     numbers — `cross_val_predict` wraps the whole `GridSearchCV`, so the quoted `cv_r2`,
+     `cv_mae` and 90% residual interval are not in-sample fit. What they cannot account for is
+     that the **feature set, the model family and the representation were all chosen by looking
+     at these same 228 subjects**, across every arm in this document. That selection makes the
+     shipped numbers optimistic by an amount that is not measurable from inside this cohort.
+     The report's "typical error ~X points" should be read as a best case.
+
+  No hold-out was spent. Closing (2) honestly would need subjects that played no part in any
+  choice above, and ARC has none left: 228 is the entire labelled cohort.
 
   > **Correction.** "The only one still open" was written while the permutation null was
   > outstanding, so it was not true when written — there were two. With the null closed it is

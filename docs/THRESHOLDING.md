@@ -1,5 +1,12 @@
 # Thresholding the disconnection matrices — the design, and the predictions
 
+> **Update, 2026-09-21 — run, and the answer is no.** §9 has the results. Four
+> predictions produced five scored halves: four held and P2(a) was falsified. The decisive
+> number is the size-matched random control (C1): **edges chosen at random score +0.5084,
+> above the fibre-selected +0.5010.** Thresholding does not select connections; it removes
+> columns. Nothing beats location after correction, and nothing survives removing volume.
+> §1–8 are the design as committed in `b802722` before any fit, unedited.
+>
 > **Design document. Nothing here has been run.** Predictions P1–P4 are committed below
 > *before* any model is fitted, with explicit falsification criteria, because this project
 > has set thresholds by first guess and been wrong both times it did so — the ">5 mm off
@@ -520,3 +527,111 @@ tract vector and location vector. The 108 figures use the `sub-0*` ids in the sa
 - **It is not a fix for n = 228.** LITERATURE.md's caution stands verbatim: a real +0.03
   effect remains invisible at this sample size, so the most likely honest outcome of the whole
   sweep is a flat curve and four confirmed predictions.
+
+---
+
+## 9. Results — 2026-09-21
+
+Implemented in `706ee94` (`modeling.py`, arms named `<base>@<op>`). The permissive end of
+every axis (`@sup0`, `@tau0`, `@prev0`) was verified **bit-identical** to the unthresholded
+features on all 228 ARC subjects before anything was fitted, and the live-column counts
+matched §2's measurements (108 at k=10, 80 at k=50, 102 at prevalence 0.02).
+
+**Sanity gates passed.** In every invocation `volume` came back at +0.3984 and `location` at
++0.4436 (hist_gb), exactly as published. The volume control on the residual was −0.0146.
+
+**Scope actually run.** The design called for 7 support values, 6 prevalence values and 5
+τ values. For speed, three points per axis were run: support k ∈ {0, 10, 50}, prevalence
+m ∈ {0, 0.02, 0.10}, and absolute τ ∈ {0, 0.02, 0.10} (τ=0.02 on the counted matrix too).
+C1 and C2 ran at k = 10 only, with **one** random draw rather than the five §4 asked for.
+Relative τ was not run. Treat the curve as coarse.
+
+### The sweep (its own correction family; no corrected p is quoted from it)
+
+`arc_wab_aq_threshold_results.csv`, ARC n = 228, 25 outer folds:
+
+| arm | hist_gb R² [95%] | ridge R² | ridge worst fold | ridge folds > 0 | live cols |
+|---|---|---|---|---|---|
+| counted, unthresholded | +0.4806 [0.222, 0.659] | +0.3925 | **−63.48** | 17 | 118 |
+| counted `@sup10` | **+0.5010** [0.267, 0.657] | +0.4151 | −8.30 | 16 | 108 |
+| counted `@sup50` | +0.4746 [0.321, 0.648] | +0.4250 | −0.67 | 21 | 80 |
+| counted `@prev0.02` | +0.4806 | **+0.4798** | **+0.265** | **25** | 102 |
+| counted `@prev0.1` | +0.4806 | +0.4803 | +0.264 | 25 | 101 |
+| counted `@tau0.02` | +0.4830 | +0.4205 | −7.88 | 20 | 116 |
+| inferred, unthresholded | +0.4653 | +0.4374 | −1.23 | 23 | 134 |
+| inferred `@tau0.02` | +0.4331 | +0.4563 | +0.237 | 25 | 129 |
+| inferred `@tau0.1` | +0.4259 | +0.3641 | −5.46 | 22 | 77 |
+| **C1** counted `@sup10rand` | **+0.5084** [0.260, 0.651] | +0.4721 | +0.304 | 25 | 113 |
+| **C2** counted `@sup10comp` | +0.4622 | +0.4912 | +0.275 | 25 | 106 |
+| counted `@max` (no threshold) | +0.3489 | +0.3642 | −1.07 | 22 | 118 |
+| location | +0.4436 | +0.3395 | −0.74 | 21 | 270 |
+| volume | +0.3984 | +0.3347 | +0.225 | 25 | 1 |
+
+### Predictions, scored
+
+| | prediction | measured | verdict |
+|---|---|---|---|
+| **P1** | every k within ±0.03 of 0.4806, none ≥ 0.52 | k=10 +0.0204, k=50 −0.0060; max 0.5010 | **held** (on 2 of the 5 k values it named) |
+| **P2(a)** | support never repairs ridge (`r2_lo < −5`, ≤ 20 folds positive) | k=10: −8.30, 16 folds (holds); **k=50: −0.67, 21 folds** | **falsified at k = 50** |
+| **P2(b)** | prevalence ≥ 0.02 repairs ridge (`r2_lo > −1`, ≥ 23 folds) | +0.265, 25/25; median +0.3925 → +0.4798 | **held, strongly** |
+| **P3** | nothing beats location (paired, corrected) | best: `@sup10` +0.0384, 18/25, p 0.0136, **p_bonf 0.1224** in the 9-row Phase 3 family | **held** |
+| **P4(a)** | every thresholded arm ≤ +0.02 on the volume-free residual; volume control in [−0.05, +0.02] | `@sup10` −0.0268; control −0.0146 | **held** |
+| **P4(b)** | 108, log volume: counted `@sup50` stays ≥ 0.55 | 0.6822 (unthresholded 0.7101 in the same run) | **held** |
+
+**On P2(a).** The falsification is real and shows where §3's reasoning went wrong. A
+50-fibre floor zeroes 56 of 136 network columns, and that is enough to take out most of the
+near-constant columns behind ridge's blow-up, even though the single worst column survives.
+But C1 and C2 at k = 10 are *also* stable under ridge (worst folds +0.30 and +0.27). **Any mask
+that removes enough columns repairs ridge, whether it selects by support, at random, or
+takes the complement.** The instability comes from a handful of columns, and it does not
+matter much which mask removes them. Prevalence filtering is the only one of these that
+targets them directly, which is why it does the most with the fewest columns dropped (34).
+
+### The controls, and why they decide it
+
+- **C1, size-matched random edges, scores +0.5084, above the support-selected +0.5010.**
+  The paired difference against location is +0.0696 for random and +0.0384 for selected. The
+  small gain `@sup10` shows over the unthresholded arm comes from **having fewer columns**,
+  not from keeping well-supported connections. §4 named this the predicted outcome, and it is
+  the one that happened.
+- **C2, only the discarded edges, scores within the spread of the kept set**: +0.4622
+  hist_gb and +0.4912 ridge, against +0.5010. It holds about 5% of the severed fibres. Two
+  disjoint edge sets predicting about equally well means neither carries edge-specific
+  information. Both carry lesion size.
+- **The max summary is worse, not better.** It conditions the features about 100× better
+  (§6 item 8) and scores +0.3489, significantly below location (−0.0692, 5/25,
+  p = 0.0004). Better-conditioned features are not better features. It also rules out the
+  max summary as a hidden explanation for anything above.
+
+### The promoted arm
+
+The selection rule, fixed in §5 before the run, is: the largest `k` within 0.01 of the best
+support score. The support scores were k = 0: 0.4806, k = 10: 0.5010, k = 50: 0.4746, so the
+rule gives **k = 10**. C1 is a control, not a candidate, and is excluded from the rule. The
+promoted arm was then run in the original Phase 3 family:
+
+| | value |
+|---|---|
+| raw R², hist_gb, nested CV | **+0.5010** [0.267, 0.657] |
+| vs location, paired | +0.0384, 18/25, p = 0.0136, **p_bonf = 0.1224** (9 rows) |
+| vs volume, paired | +0.0880, 19/25, p = 0.0018, p_bonf = 0.0162 |
+| volume-free residual | **−0.0268** [−55.97, +0.026] (elasticnet, the best family on the residual) |
+| permutation null, 200 shuffles | observed +0.5382, null median −0.2049, **p = 0.005** |
+
+It beats chance, like every real arm, and beats volume head to head, like the unthresholded
+counted arm already nearly did. It does **not** beat location after correction, and it
+carries nothing once volume is out of the target. And C1 says that even its raw margin is
+dimensionality.
+
+### What this licenses
+
+- **Thresholding, as the literature describes it, does not change the Phase 3 answer here.**
+  B ≈ A stands, and the volume-residual statement stands, now with one more representation
+  behind it.
+- **It does not contradict Khalilian 2025.** Their threshold is a healthy-subject prevalence
+  in a probabilistic atlas, at n = 340. Neither matrix here has a healthy population behind
+  it (§1.3), so this is a test of the nearest available analogue, not a replication attempt.
+- **A useful by-product.** `@prev0.02` makes ridge usable on the counted features: worst fold
+  +0.265 instead of −63.5, with the same hist_gb score. Anyone wanting a linear model on
+  these features should apply it. It is a conditioning fix, not a signal.
+- **It is still n = 228.** Every interval in the table above is about 0.4 wide.
