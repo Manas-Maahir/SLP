@@ -351,33 +351,27 @@ measuring lesion size."
 
 ---
 
-## Slide 14 — Next steps (1 minute)
+## Slide 14 — The last experiment, and what's parked (1 minute)
 
-"In priority order.
+"One thing was left that the literature specifically said to try: threshold the
+disconnection maps, meaning keep only the well-supported connections and throw away the rest.
+A study of 340 patients found that thresholded maps win where unthresholded ones lose.
 
-First, threshold the disconnection maps — keep only the connections that show up
-in enough healthy brains, and throw away the rest. I have two independent ways
-of measuring disconnection and they disagree about individual connections, which
-says the fine-grained map is mostly noise. An independent study of 340 patients
-found the same thing from the other direction: unthresholded maps lose to plain
-lesion masks, thresholded ones win. It's cheap to try. It is not a fix for
-having 228 patients.
+I wrote down what I expected before running it, and I expected it to change nothing. It
+didn't. The best threshold nudges the score up a couple of points, doesn't beat location once
+you correct for multiple comparisons, and scores nothing once lesion volume is taken out.
 
-Then hold out a genuine test set. Right now every number I've shown is cross-validated
-on the same 228 patients, which is standard practice but is not the same as a
-clean test set. I want to be honest that this one is hard rather than just undone
-— 228 is few enough that setting a fifth of them aside would leave the comparison
-too weak to mean anything. It's a real limitation and I'd rather state it than
-paper over it.
+The control is what settles it. I also ran the same number of connections chosen *at random*,
+and random scored slightly higher than the carefully selected set. So the small gain came
+from having fewer columns, not from picking the right connections.
 
-Then compare alternative registration methods, because I accepted the current one
-on a good score without checking whether something else is better. Then lesion
-filling. Then wire the results into the viewer.
+That closes the modelling. Everything else on the old list, like graph neural networks and
+embeddings, is a more elaborate way of representing the same map, and every representation
+I've tried comes out as lesion size. What would change the answer is different data:
+each patient's own diffusion scan, or a bigger labelled cohort. Not a cleverer model.
 
-Three items came *off* this list, and all three came off by measuring rather than
-deciding. Getting more patients turned out to be impossible. The demographic
-covariates turned out to be nothing. And the validation test — the one I flagged
-as incomplete on the last slide — is now finished on all six models."
+Parked with reasons: registration alternatives, lesion filling, and the viewer integration.
+The hold-out is not spent, for the reasons on the previous slides."
 
 ---
 

@@ -542,21 +542,36 @@ tb(s, Inches(.7), Inches(_pbottom + .1), Inches(11.9), Inches(.55),
    size=12.5, color=MUTED, line=1.3)
 
 
-# ---------------------------------------------------------------- 14 next
-s = new("Next steps", "In priority order")
-bullets(s, Inches(.7), Inches(2.0), Inches(11.9), [
-    "1. Threshold the disconnection maps |  keep only connections present in enough healthy brains. An independent study of 340 patients found unthresholded maps lose to plain lesion masks while thresholded ones win, and our own two measures disagree in a way that says the same thing.",
-    "2. Hold out a test set |  the one remaining gap in the analysis. All current figures are cross-validated on the same 228 subjects, and 228 is too few to spend on a holdout without losing the comparison entirely.",
-    "3. Compare alternative registration methods |  the current method was accepted on a Dice of 0.924, which does not establish that it is the best option.",
-    "4. Test lesion-filling during registration |  a stronger alternative to the current approach.",
-    "5. Display disconnection results in the viewer |  the export path has not yet been tested against a running instance.",
-], size=15, gap=15)
-rule(s, Inches(.7), Inches(5.8), Inches(11.9))
-tb(s, Inches(.7), Inches(6.0), Inches(11.9), Inches(1.0),
-   "Completed since this list was written: the permutation test, now run on all six models. "
-   "Removed from the plan: increasing the ARC sample, which is not possible, and adding "
-   "demographic covariates, which changed nothing. All three were resolved by measurement.",
-   size=14, bold=True, color=ACCENT, line=1.4)
+# ---------------------------------------------------------------- 14 threshold
+def threshold_rows() -> dict[str, dict[str, str]]:
+    """Slide 14's numbers, read from the sweep the harness wrote -- hist_gb, the headline family."""
+    import csv
+
+    with (MODELING / "arc_wab_aq_threshold_results.csv").open(newline="", encoding="utf-8") as fh:
+        return {r["feature_set"]: r for r in csv.DictReader(fh) if r["model"] == "hist_gb"}
+
+
+_thr = threshold_rows()
+_r2 = {k: float(v["r2_median"]) for k, v in _thr.items()}
+s = new("The last experiment", "Thresholding the maps changes nothing, and the control shows why")
+tb(s, Inches(.7), Inches(1.78), Inches(11.9), Inches(.6),
+   "The one step the literature named: keep only well-supported connections, discard the rest. "
+   "The predictions were written down before the run.", size=15.5, line=1.3)
+_trows = [
+    ["unthresholded (as published)", f"{_r2['network_edges_streamline']:+.3f}"],
+    ["kept: connections with 10+ fibres", f"{_r2['network_edges_streamline@sup10']:+.3f}"],
+    ["same number of RANDOM connections", f"{_r2['network_edges_streamline@sup10rand']:+.3f}"],
+    ["only the DISCARDED connections", f"{_r2['network_edges_streamline@sup10comp']:+.3f}"],
+    ["location baseline", f"{_r2['location']:+.3f}"],
+]
+table(s, Inches(.7), Inches(2.45), [Inches(6.4), Inches(2.2)], ["FEATURE SET", "R²"], _trows,
+      row_colors=[MUTED, ACCENT, WARN, MUTED, MUTED])
+tb(s, Inches(.7), Inches(6.2), Inches(11.9), Inches(1.0),
+   "Random connections score as well as the selected ones, so the small gain is from fewer "
+   "columns, not better ones. It does not beat location once corrected, and scores nothing "
+   "once lesion volume is removed. That closes the modelling: what would change the answer "
+   "is different data, not a different representation of the same map.",
+   size=12.5, bold=True, color=ACCENT, line=1.3)
 
 # ---------------------------------------------------------------- 15 close
 s = new("Summary", "What the evidence currently supports")
